@@ -4,12 +4,13 @@
 #
 # File name: diy-part2.sh
 # Description: OpenWrt DIY script part 2 (After Update feeds)
+# 注意：此脚本在工作流的步骤 7 执行（在 feeds install 之后，make defconfig 之前）
 #
 
 # 1. 修改默认管理 IP
 sed -i 's/192.168.1.1/10.1.1.1/g' package/base-files/files/bin/config_generate
 
-# 2. 固化中文语言与 Argon 主题（通过 uci-defaults，避免文件冲突）
+# 2. 固化中文语言与 Argon 主题（通过 uci-defaults 脚本，不产生文件冲突）
 mkdir -p package/base-files/files/etc/uci-defaults
 cat << 'EOF' > package/base-files/files/etc/uci-defaults/99-custom-luci
 #!/bin/sh
@@ -19,8 +20,9 @@ uci commit luci
 exit 0
 EOF
 chmod +x package/base-files/files/etc/uci-defaults/99-custom-luci
+echo "✅ 已添加 uci-defaults 脚本，首次启动将自动设置语言和主题"
 
-# 3. 自动更新 PassWall 核心组件 (已修复潜在的空格格式问题)
+# 3. 自动更新 PassWall 核心组件（Xray/sing-box/hysteria）
 update_go_package() {
     local pkg_name=$1
     local github_repo=$2
@@ -41,31 +43,24 @@ update_go_package "xray-core" "XTLS/Xray-core"
 update_go_package "sing-box" "SagerNet/sing-box"
 update_go_package "hysteria" "apernet/hysteria"
 
-# 4. CPU 温度与硬件加速支持 (针对 J1900)
+# 4. 添加 CPU 温度与硬件加速支持（适用于 J1900 等）
 echo 'CONFIG_PACKAGE_kmod-coretemp=y' >> .config
 echo 'CONFIG_PACKAGE_kmod-it87=y' >> .config
 echo 'CONFIG_PACKAGE_lm-sensors=y' >> .config
 echo 'CONFIG_NODEJS_GCC_X64_LEVEL=2' >> .config
 
-# 5. 首页温度模板应用 (确保路径正确)
+# 5. 首页温度模板应用（如果你有自定义模板文件）
 TARGET_INDEX="feeds/luci/modules/luci-mod-status/luasrc/view/admin_status/index.htm"
 if [ -f "files/usr/lib/lua/luci/view/admin_status/index.htm" ]; then
     cp -f "files/usr/lib/lua/luci/view/admin_status/index.htm" "$TARGET_INDEX"
-    echo "✅ 已成功应用自定义温度显示模板"
+    echo "✅ 已应用自定义温度显示模板"
 fi
 
-# 6. 修复编译失败与添加插件
-# 1) 克隆 Argon 配置插件 (解决之前 part1 删掉源后的下载问题)
+# 6. 添加其他必要插件（例如 Argon 配置插件）
 git clone --depth 1 https://github.com/jerrykuku/luci-app-argon-config.git package/luci-app-argon-config
+echo "✅ 已添加 luci-app-argon-config"
 
-# 2) 补齐缺失的 python 依赖（如果不存在也无妨）
-./scripts/feeds install python3-pysocks 2>/dev/null || true
-./scripts/feeds install python3-unidecode 2>/dev/null || true
-
-# 3) 强制删除冲突的 onionshare 源码目录
-rm -rf feeds/packages/net/onionshare-cli
-
-# 4) 最后刷新所有 feeds 索引并安装
+# 7. 最后刷新 feeds（确保所有自定义包被识别）
 ./scripts/feeds install -a
 
-echo "🚀 DIY 脚本执行完成"
+echo "🚀 diy-part2.sh 执行完毕"
