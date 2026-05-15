@@ -21,18 +21,18 @@ add_feed() {
     fi
 }
 
-# 1. 添加 PassWall 相关源（使用 master 分支，稳定）
-add_feed 'src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;master'
-add_feed 'src-git passwall_luci https://github.com/Openwrt-Passwall/openwrt-passwall.git;master'
+# 1. 添加 PassWall 相关源（使用标准 ^%S 占位符，替代 ;master）
+add_feed 'src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git^%S'
+add_feed 'src-git passwall_luci https://github.com/Openwrt-Passwall/openwrt-passwall.git^%S'
 # 可选：如果需要额外 PassWall 组件，取消注释下面一行
-# add_feed 'src-git passwall_spec https://github.com/Openwrt-PassWall/openwrt-passwall-spec.git'
+# add_feed 'src-git passwall_spec https://github.com/Openwrt-PassWall/openwrt-passwall-spec.git^%S'
 
-# 2. 添加 OpenClash 源（使用 master 分支）
-add_feed 'src-git openclash https://github.com/vernesong/OpenClash.git;master'
+# 2. 添加 OpenClash 源
+add_feed 'src-git openclash https://github.com/vernesong/OpenClash.git^%S'
 
-# 3. 添加 Argon 主题及其配置插件（使用 master 分支）
-add_feed 'src-git argon https://github.com/jerrykuku/luci-theme-argon.git;master'
-add_feed 'src-git argonconfig https://github.com/jerrykuku/luci-app-argon-config.git;master'
+# 3. 添加 Argon 主题及其配置插件
+add_feed 'src-git argon https://github.com/jerrykuku/luci-theme-argon.git^%S'
+add_feed 'src-git argonconfig https://github.com/jerrykuku/luci-app-argon-config.git^%S'
 
 # 4. (可选) 如果你需要更多插件，可以在下方按照相同格式继续添加
-# add_feed 'src-git example https://github.com/example/example.git;branch'
+# add_feed 'src-git example https://github.com/example/example.git^%S'
