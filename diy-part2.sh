@@ -11,11 +11,9 @@
 #
 
 # ==================== 1. 修改默认管理 IP ====================
-# 将默认 IP 从 192.168.1.1 改为 10.1.1.1
 sed -i 's/192.168.1.1/10.1.1.1/g' package/base-files/files/bin/config_generate
 
 # ==================== 2. 固化中文语言与 Argon 主题 ====================
-# 确保系统重置后依然默认显示中文和 Argon 主题
 mkdir -p package/base-files/files/etc/config
 cat << 'EOF' > package/base-files/files/etc/config/luci
 config core 'main'
@@ -28,8 +26,7 @@ config internal 'themes'
 	option Bootstrap '/luci-static/bootstrap'
 EOF
 
-# ==================== 3. 自动更新 PassWall 核心组件 ====================
-# 自动拉取 GitHub 最新版 Xray/Sing-box/Hysteria，保证节点协议最新
+# ==================== 3. 自动更新 PassWall 核心组件（可选，若编译超时可注释整个函数调用） ====================
 update_go_package() {
     local pkg_name=$1
     local github_repo=$2
@@ -46,17 +43,16 @@ update_go_package() {
         fi
     fi
 }
+# 若编译时常因网络问题卡住，可将下面三行注释掉以跳过自动更新
 update_go_package "xray-core" "XTLS/Xray-core"
 update_go_package "sing-box" "SagerNet/sing-box"
 update_go_package "hysteria" "apernet/hysteria"
 
-# ==================== 4. CPU 温度显示集成 (适配 files 目录) ====================
-# 注入 x86 CPU 温度传感器驱动
+# ==================== 4. CPU 温度显示集成 ====================
 echo 'CONFIG_PACKAGE_kmod-coretemp=y' >> .config
 echo 'CONFIG_PACKAGE_kmod-it87=y' >> .config
 echo 'CONFIG_PACKAGE_lm-sensors=y' >> .config
 
-# 自动将你上传到仓库的 index.htm 覆盖到源码路径，实现首页显示温度
 TARGET_INDEX="feeds/luci/modules/luci-mod-status/luasrc/view/admin_status/index.htm"
 if [ -f "files/usr/lib/lua/luci/view/admin_status/index.htm" ]; then
     cp -f "files/usr/lib/lua/luci/view/admin_status/index.htm" "$TARGET_INDEX"
@@ -66,5 +62,4 @@ else
 fi
 
 # ==================== 5. 最后的配置刷新 ====================
-# 自动处理依赖冲突
 make defconfig
