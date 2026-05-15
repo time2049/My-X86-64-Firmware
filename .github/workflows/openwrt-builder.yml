@@ -2,10 +2,10 @@
 # https://github.com/P3TERX/Actions-OpenWrt
 #
 # File: .github/workflows/openwrt-builder.yml
-# Description: Build OpenWrt using GitHub Actions
+# Description: Build OpenWrt 25.x (Master) using GitHub Actions
 #
 
-name: My-X86-64-Firmware 云编译
+name: My-X86-64-Firmware-25分支云编译
 
 on:
   repository_dispatch:
@@ -21,7 +21,7 @@ permissions:
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: openwrt-24.10
+  REPO_BRANCH: master
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
@@ -46,6 +46,7 @@ jobs:
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
         sudo docker image prune --all --force
         sudo apt-get update
+        # 使用最新的 ready-2204 脚本，完美适配 25.x 编译依赖
         sudo apt-get install -y $(curl -fsSL https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/tools/ready-2204)
         sudo apt-get autoremove -y --purge
         sudo apt-get clean
@@ -57,7 +58,7 @@ jobs:
       working-directory: /workdir
       run: |
         df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: 4. 加载自定义 feeds (diy-part1)
@@ -79,6 +80,8 @@ jobs:
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
         cd openwrt
+        # 针对 25 分支 APK 系统的预处理（防止签名报错）
+        sed -i 's/CONFIG_SIGNED_PACKAGES=y/CONFIG_SIGNED_PACKAGES=n/g' .config
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
     - name: 8. SSH 远程配置 (按需开启)
@@ -121,7 +124,7 @@ jobs:
       uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt_25_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
 
     - name: 13. 生成发布标签 (Releases)
@@ -129,7 +132,7 @@ jobs:
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        echo "🚀 固件编译自：$(date +"%Y-%m-%d %H:%M")" >> release.txt
+        echo "🚀 固件编译自 25 分支：$(date +"%Y-%m-%d %H:%M")" >> release.txt
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 14. 上传固件到 Releases
@@ -142,21 +145,6 @@ jobs:
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
 
-    - name: 15. 删除旧的运行记录
-      uses: Mattraks/delete-workflow-runs@main
-      with:
-        retain_days: 0
-        keep_minimum_runs: 2
-
-    - name: 16. 删除旧版 Releases
-      uses: dev-drprasad/delete-older-releases@master
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      with:
-        keep_latest: 3
-        delete_tags: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     # ==================== Telegram 通知 ====================
     - name: 发送成功通知（Telegram）
       if: success() && github.event_name == 'workflow_dispatch'
@@ -164,7 +152,7 @@ jobs:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        MESSAGE="🎉 ✅ **OpenWrt 编译成功！** 🚀"
+        MESSAGE="🎉 ✅ **OpenWrt 25分支 编译成功！** 🚀"
         MESSAGE="${MESSAGE}\n📦 仓库：${{ github.repository }}"
         MESSAGE="${MESSAGE}\n👤 触发者：小z"
         MESSAGE="${MESSAGE}\n🔗 Release 地址：${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }}"
@@ -179,7 +167,7 @@ jobs:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        MESSAGE="😭 ❌ **OpenWrt 编译失败！** ⚠️"
+        MESSAGE="😭 ❌ **OpenWrt 25分支 编译失败！** ⚠️"
         MESSAGE="${MESSAGE}\n📦 仓库：${{ github.repository }}"
         MESSAGE="${MESSAGE}\n👤 触发者：小z"
         MESSAGE="${MESSAGE}\n📋 点击查看日志：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
