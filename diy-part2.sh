@@ -65,10 +65,6 @@ else
     echo "⚠️ 警告：未在 files 目录找到 index.htm，首页可能不显示温度"
 fi
 
-# ==================== 5. 修复 UPnP 列表显示 Bug ====================
-# 强制开启租约功能，解决 J1900 物理机 UPnP 列表空白的问题
-sed -i 's/option enable_upnp 0/option enable_upnp 1/g' package/feeds/luci/luci-app-upnp/root/etc/config/upnpd
-
-# ==================== 6. 最后的配置刷新 ====================
+# ==================== 5. 最后的配置刷新 ====================
 # 自动处理依赖冲突
 make defconfig
