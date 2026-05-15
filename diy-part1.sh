@@ -21,18 +21,19 @@ add_feed() {
     fi
 }
 
-# 1. 添加 PassWall 相关源（已去除 ^%S）
+# 0. 清理可能导致报错的旧源（如果有）
+sed -i '/argonconfig/d' feeds.conf.default
+
+# 1. 添加 PassWall 相关源
 add_feed 'src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git'
 add_feed 'src-git passwall_luci https://github.com/Openwrt-Passwall/openwrt-passwall.git'
-# 可选：如果需要额外 PassWall 组件，取消注释下面一行
-# add_feed 'src-git passwall_spec https://github.com/Openwrt-PassWall/openwrt-passwall-spec.git'
 
 # 2. 添加 OpenClash 源
 add_feed 'src-git openclash https://github.com/vernesong/OpenClash.git'
 
-# 3. 添加 Argon 主题及其配置插件
+# 3. 添加 Argon 主题
+# 注意：大部分源码已经自带 Argon，如果你的 .config 里能选，其实这一行也可以不加
 add_feed 'src-git argon https://github.com/jerrykuku/luci-theme-argon.git'
-add_feed 'src-git argonconfig https://github.com/jerrykuku/luci-app-argon-config.git'
 
-# 4. (可选) 如果你需要更多插件，可以在下方按照相同格式继续添加
-# add_feed 'src-git example https://github.com/example/example.git'
+# 4. 修复：不再通过 src-git 添加 argonconfig（防止 index missing 报错）
+# 如果你真的需要这个插件，建议在 diy-part2.sh 中通过 git clone 方式下载到 package 目录
