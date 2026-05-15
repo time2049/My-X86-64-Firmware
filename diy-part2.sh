@@ -26,7 +26,7 @@ config internal 'themes'
 	option Bootstrap '/luci-static/bootstrap'
 EOF
 
-# ==================== 3. 自动更新 PassWall 核心组件（可选，若编译超时可注释整个函数调用） ====================
+# ==================== 3. 自动更新 PassWall 核心组件（每次编译拉取最新版） ====================
 update_go_package() {
     local pkg_name=$1
     local github_repo=$2
@@ -43,7 +43,7 @@ update_go_package() {
         fi
     fi
 }
-# 若编译时常因网络问题卡住，可将下面三行注释掉以跳过自动更新
+# 每次编译都拉取 xray-core、sing-box、hysteria 的最新版本
 update_go_package "xray-core" "XTLS/Xray-core"
 update_go_package "sing-box" "SagerNet/sing-box"
 update_go_package "hysteria" "apernet/hysteria"
