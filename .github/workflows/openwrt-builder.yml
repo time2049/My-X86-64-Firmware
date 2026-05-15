@@ -10,11 +10,7 @@ name: My-X86-64-Firmware-25分支云编译
 on:
   repository_dispatch:
   workflow_dispatch:
-    inputs:
-      ssh:
-        description: '是否开启 SSH 远程配置 (true/false)'
-        required: false
-        default: 'false'
+    # 已删除 SSH 输入项，点击运行即可开始
 
 permissions:
   contents: write
@@ -26,7 +22,6 @@ env:
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
-  UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
@@ -39,12 +34,14 @@ jobs:
     - name: 1. 检出代码
       uses: actions/checkout@main
 
-    - name: 2. 初始化编译环境
+    - name: 2. 深度清理磁盘空间
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
         sudo docker image prune --all --force
+        sudo rm -rf /usr/local/share/boost
+        sudo rm -rf /usr/lib/x86_64-linux-gnu/openblas
         sudo apt-get update
         sudo apt-get install -y $(curl -fsSL https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/tools/ready-2204)
         sudo apt-get autoremove -y --purge
@@ -52,11 +49,11 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
+        df -h
 
     - name: 3. 克隆源码
       working-directory: /workdir
       run: |
-        df -hT $PWD
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
@@ -79,16 +76,9 @@ jobs:
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
         cd openwrt
-        # 针对 25 分支 APK 系统的预处理（防止签名报错）
+        # 强制关闭签名（25分支 APK 系统必备）
         sed -i 's/CONFIG_SIGNED_PACKAGES=y/CONFIG_SIGNED_PACKAGES=n/g' .config
         $GITHUB_WORKSPACE/$DIY_P2_SH
-
-    - name: 8. SSH 远程配置 (按需开启)
-      uses: P3TERX/ssh2actions@main
-      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
-      env:
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
 
     - name: 9. 下载软件包
       id: package
@@ -143,33 +133,15 @@ jobs:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
-        fail_on_unmatched_files: false
 
-    - name: 发送成功通知（Telegram）
-      if: success() && github.event_name == 'workflow_dispatch'
+    - name: 发送通知（Telegram）
+      if: always() && github.event_name == 'workflow_dispatch'
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        MESSAGE="🎉 ✅ **OpenWrt 25分支 编译成功！** 🚀"
-        MESSAGE="${MESSAGE}\n📦 仓库：${{ github.repository }}"
-        MESSAGE="${MESSAGE}\n👤 触发者：小z"
-        MESSAGE="${MESSAGE}\n🔗 Release 地址：${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }}"
-        curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-          -d chat_id="${TELEGRAM_CHAT_ID}" \
-          -d parse_mode="Markdown" \
-          -d text="${MESSAGE}"
-
-    - name: 发送失败通知（Telegram）
-      if: failure() && github.event_name == 'workflow_dispatch'
-      env:
-        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: |
-        MESSAGE="😭 ❌ **OpenWrt 25分支 编译失败！** ⚠️"
-        MESSAGE="${MESSAGE}\n📦 仓库：${{ github.repository }}"
-        MESSAGE="${MESSAGE}\n👤 触发者：小z"
-        MESSAGE="${MESSAGE}\n📋 点击查看日志：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        [ "${{ job.status }}" == "success" ] && STATUS="✅ 成功" || STATUS="❌ 失败"
+        MESSAGE="${STATUS}！**OpenWrt 25分支 编译完成** 🚀\n👤 触发者：小z\n📋 日志：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
           -d chat_id="${TELEGRAM_CHAT_ID}" \
           -d parse_mode="Markdown" \
