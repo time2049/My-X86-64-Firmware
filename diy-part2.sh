@@ -22,7 +22,7 @@ config internal 'themes'
 	option Bootstrap '/luci-static/bootstrap'
 EOF
 
-# 3. 自动更新 PassWall 核心组件
+# 3. 自动更新 PassWall 核心组件 (已修复潜在的空格格式问题)
 update_go_package() {
     local pkg_name=$1
     local github_repo=$2
@@ -43,25 +43,31 @@ update_go_package "xray-core" "XTLS/Xray-core"
 update_go_package "sing-box" "SagerNet/sing-box"
 update_go_package "hysteria" "apernet/hysteria"
 
-# 4. CPU 温度与硬件加速支持
+# 4. CPU 温度与硬件加速支持 (针对 J1900)
 echo 'CONFIG_PACKAGE_kmod-coretemp=y' >> .config
 echo 'CONFIG_PACKAGE_kmod-it87=y' >> .config
 echo 'CONFIG_PACKAGE_lm-sensors=y' >> .config
-# J1900 建议开启 AES 指令集优化 (如果源码支持)
 echo 'CONFIG_NODEJS_GCC_X64_LEVEL=2' >> .config
 
-# 5. 首页温度模板应用
+# 5. 首页温度模板应用 (确保路径正确)
 TARGET_INDEX="feeds/luci/modules/luci-mod-status/luasrc/view/admin_status/index.htm"
 if [ -f "files/usr/lib/lua/luci/view/admin_status/index.htm" ]; then
     cp -f "files/usr/lib/lua/luci/view/admin_status/index.htm" "$TARGET_INDEX"
     echo "✅ 已成功应用自定义温度显示模板"
 fi
 
-# 6. 修复编译失败：解决依赖缺失与冲突
-# 先安装缺失的包，再删掉冲突的源码，最后刷新全部 feeds
+# 6. 修复编译失败与添加插件
+# 1) 克隆 Argon 配置插件 (解决之前 part1 删掉源后的下载问题)
+git clone --depth 1 https://github.com/jerrykuku/luci-app-argon-config.git package/luci-app-argon-config
+
+# 2) 补齐缺失的 python 依赖
 ./scripts/feeds install python3-pysocks
 ./scripts/feeds install python3-unidecode
+
+# 3) 强制删除冲突的 onionshare 源码目录
 rm -rf feeds/packages/net/onionshare-cli
+
+# 4) 最后刷新所有 feeds 索引并安装
 ./scripts/feeds install -a
 
 echo "🚀 DIY 脚本执行完成"
