@@ -46,7 +46,6 @@ jobs:
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
         sudo docker image prune --all --force
         sudo apt-get update
-        # 使用最新的 ready-2204 脚本，完美适配 25.x 编译依赖
         sudo apt-get install -y $(curl -fsSL https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/tools/ready-2204)
         sudo apt-get autoremove -y --purge
         sudo apt-get clean
@@ -113,7 +112,7 @@ jobs:
 
     - name: 11. 整理固件文件
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      if: env.UPLOAD_FIRMWARE == 'true' && steps.compile.outputs.status == 'success' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
@@ -129,14 +128,14 @@ jobs:
 
     - name: 13. 生成发布标签 (Releases)
       id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      if: env.UPLOAD_RELEASE == 'true' && steps.organize.outputs.status == 'success' && !cancelled()
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         echo "🚀 固件编译自 25 分支：$(date +"%Y-%m-%d %H:%M")" >> release.txt
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 14. 上传固件到 Releases
-      uses: softprops/action-gh-release@master
+      uses: softprops/action-gh-release@v1   # 改用固定版本，避免意外
       if: steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -144,6 +143,7 @@ jobs:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
+        fail_on_unmatched_files: false
 
     # ==================== Telegram 通知 ====================
     - name: 发送成功通知（Telegram）
