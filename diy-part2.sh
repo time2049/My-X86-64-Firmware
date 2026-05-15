@@ -9,18 +9,16 @@
 # 1. 修改默认管理 IP
 sed -i 's/192.168.1.1/10.1.1.1/g' package/base-files/files/bin/config_generate
 
-# 2. 固化中文语言与 Argon 主题
-mkdir -p package/base-files/files/etc/config
-cat << 'EOF' > package/base-files/files/etc/config/luci
-config core 'main'
-	option lang 'zh-cn'
-	option mediaurlbase '/luci-static/argon'
-	option resourcebase '/luci-static/resources'
-
-config internal 'themes'
-	option Argon '/luci-static/argon'
-	option Bootstrap '/luci-static/bootstrap'
+# 2. 固化中文语言与 Argon 主题（通过 uci-defaults，避免文件冲突）
+mkdir -p package/base-files/files/etc/uci-defaults
+cat << 'EOF' > package/base-files/files/etc/uci-defaults/99-custom-luci
+#!/bin/sh
+uci set luci.main.lang='zh-cn'
+uci set luci.main.mediaurlbase='/luci-static/argon'
+uci commit luci
+exit 0
 EOF
+chmod +x package/base-files/files/etc/uci-defaults/99-custom-luci
 
 # 3. 自动更新 PassWall 核心组件 (已修复潜在的空格格式问题)
 update_go_package() {
@@ -60,9 +58,9 @@ fi
 # 1) 克隆 Argon 配置插件 (解决之前 part1 删掉源后的下载问题)
 git clone --depth 1 https://github.com/jerrykuku/luci-app-argon-config.git package/luci-app-argon-config
 
-# 2) 补齐缺失的 python 依赖
-./scripts/feeds install python3-pysocks
-./scripts/feeds install python3-unidecode
+# 2) 补齐缺失的 python 依赖（如果不存在也无妨）
+./scripts/feeds install python3-pysocks 2>/dev/null || true
+./scripts/feeds install python3-unidecode 2>/dev/null || true
 
 # 3) 强制删除冲突的 onionshare 源码目录
 rm -rf feeds/packages/net/onionshare-cli
