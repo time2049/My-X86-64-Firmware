@@ -85,7 +85,7 @@ jobs:
 
     - name: 8. SSH 远程配置 (按需开启)
       uses: P3TERX/ssh2actions@main
-      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
       env:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -135,7 +135,7 @@ jobs:
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 14. 上传固件到 Releases
-      uses: softprops/action-gh-release@v1   # 改用固定版本，避免意外
+      uses: softprops/action-gh-release@v1
       if: steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -145,7 +145,6 @@ jobs:
         files: ${{ env.FIRMWARE }}/*
         fail_on_unmatched_files: false
 
-    # ==================== Telegram 通知 ====================
     - name: 发送成功通知（Telegram）
       if: success() && github.event_name == 'workflow_dispatch'
       env:
