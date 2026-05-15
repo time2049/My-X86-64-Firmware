@@ -2,18 +2,14 @@
 #
 # Copyright (c) 2019-2026 P3TERX <https://p3terx.com>
 #
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-# https://github.com/P3TERX/Actions-OpenWrt
 # File name: diy-part2.sh
 # Description: OpenWrt DIY script part 2 (After Update feeds)
 #
 
-# ==================== 1. 修改默认管理 IP ====================
+# 1. 修改默认管理 IP
 sed -i 's/192.168.1.1/10.1.1.1/g' package/base-files/files/bin/config_generate
 
-# ==================== 2. 固化中文语言与 Argon 主题 ====================
+# 2. 固化中文语言与 Argon 主题
 mkdir -p package/base-files/files/etc/config
 cat << 'EOF' > package/base-files/files/etc/config/luci
 config core 'main'
@@ -26,7 +22,7 @@ config internal 'themes'
 	option Bootstrap '/luci-static/bootstrap'
 EOF
 
-# ==================== 3. 自动更新 PassWall 核心组件 ====================
+# 3. 自动更新 PassWall 核心组件
 update_go_package() {
     local pkg_name=$1
     local github_repo=$2
@@ -47,25 +43,25 @@ update_go_package "xray-core" "XTLS/Xray-core"
 update_go_package "sing-box" "SagerNet/sing-box"
 update_go_package "hysteria" "apernet/hysteria"
 
-# ==================== 4. CPU 温度显示集成 ====================
+# 4. CPU 温度与硬件加速支持
 echo 'CONFIG_PACKAGE_kmod-coretemp=y' >> .config
 echo 'CONFIG_PACKAGE_kmod-it87=y' >> .config
 echo 'CONFIG_PACKAGE_lm-sensors=y' >> .config
+# J1900 建议开启 AES 指令集优化 (如果源码支持)
+echo 'CONFIG_NODEJS_GCC_X64_LEVEL=2' >> .config
 
+# 5. 首页温度模板应用
 TARGET_INDEX="feeds/luci/modules/luci-mod-status/luasrc/view/admin_status/index.htm"
 if [ -f "files/usr/lib/lua/luci/view/admin_status/index.htm" ]; then
     cp -f "files/usr/lib/lua/luci/view/admin_status/index.htm" "$TARGET_INDEX"
-    echo "✅ 已成功应用自定义温度显示模板 (index.htm)"
-else
-    echo "⚠️ 警告：未在 files 目录找到 index.htm"
+    echo "✅ 已成功应用自定义温度显示模板"
 fi
 
-# ==================== 5. 修复编译失败：解决 onionshare 依赖 ====================
-# 1. 补齐缺失的 Python 依赖库
+# 6. 修复编译失败：解决依赖缺失与冲突
+# 先安装缺失的包，再删掉冲突的源码，最后刷新全部 feeds
 ./scripts/feeds install python3-pysocks
 ./scripts/feeds install python3-unidecode
-
-# 2. 强行删除导致报错的软件包源码目录，双重保险
 rm -rf feeds/packages/net/onionshare-cli
+./scripts/feeds install -a
 
 echo "🚀 DIY 脚本执行完成"
