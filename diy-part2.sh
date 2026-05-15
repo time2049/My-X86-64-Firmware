@@ -26,7 +26,7 @@ config internal 'themes'
 	option Bootstrap '/luci-static/bootstrap'
 EOF
 
-# ==================== 3. 自动更新 PassWall 核心组件（每次编译拉取最新版） ====================
+# ==================== 3. 自动更新 PassWall 核心组件 ====================
 update_go_package() {
     local pkg_name=$1
     local github_repo=$2
@@ -43,7 +43,6 @@ update_go_package() {
         fi
     fi
 }
-# 每次编译都拉取 xray-core、sing-box、hysteria 的最新版本
 update_go_package "xray-core" "XTLS/Xray-core"
 update_go_package "sing-box" "SagerNet/sing-box"
 update_go_package "hysteria" "apernet/hysteria"
@@ -58,8 +57,15 @@ if [ -f "files/usr/lib/lua/luci/view/admin_status/index.htm" ]; then
     cp -f "files/usr/lib/lua/luci/view/admin_status/index.htm" "$TARGET_INDEX"
     echo "✅ 已成功应用自定义温度显示模板 (index.htm)"
 else
-    echo "⚠️ 警告：未在 files 目录找到 index.htm，首页可能不显示温度"
+    echo "⚠️ 警告：未在 files 目录找到 index.htm"
 fi
 
-# ==================== 5. 最后的配置刷新 ====================
-make defconfig
+# ==================== 5. 修复编译失败：解决 onionshare 依赖 ====================
+# 1. 补齐缺失的 Python 依赖库
+./scripts/feeds install python3-pysocks
+./scripts/feeds install python3-unidecode
+
+# 2. 强行删除导致报错的软件包源码目录，双重保险
+rm -rf feeds/packages/net/onionshare-cli
+
+echo "🚀 DIY 脚本执行完成"
