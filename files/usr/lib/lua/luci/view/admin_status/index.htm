@@ -1,0 +1,157 @@
+<%#
+Copyright 2008-2014 Steven Barth <steven@midlink.org>
+Copyright 2008-2019 Jo-Philipp Wich <jo@mein.io>
+Licensed under the Apache License, Version 2.0
+-%>
+
+<%
+local ver = require "luci.version"
+local sys = require "luci.sys"
+local util = require "luci.util"
+
+local loadavg = sys.loadavg()
+local uptime = sys.uptime()
+local stat = sys.info()
+local hostname = sys.hostname()
+local dnsmasq = sys.exec("ps | grep -c '[d]nsmasq'") or "0"
+local dropbear = sys.exec("ps | grep -c '[d]ropbear'") or "0"
+local has_pppoe = nixio.fs.access("/usr/sbin/pppd")
+
+local board_json = luci.sys.exec("/bin/cat /tmp/sysinfo/board.json") or ""
+local board_info = util.ubus("system", "board") or { system = "" }
+local board_name = board_info.release.description or board_info.model or board_info.hostname or "OpenWrt"
+
+-- CPU 型号获取
+local cpuinfo = luci.sys.exec("cat /proc/cpuinfo 2>&1 | grep \"model name\" | head -1 | cut -d\":\" -f2") or ""
+
+-- CPU 温度读取 (x86 使用 thermal_zone0)
+local temp_str = ""
+local fd = io.open("/sys/class/thermal/thermal_zone0/temp", "r")
+if fd then
+    local raw = fd:read("*all")
+    fd:close()
+    if raw then
+        local temp_milli = tonumber(raw)
+        if temp_milli then
+            temp_str = string.format(" %.1f°C", temp_milli / 1000)
+        end
+    end
+end
+
+-- 合并显示
+if #cpuinfo > 0 then
+    cpuinfo = cpuinfo .. temp_str
+else
+    cpuinfo = "Unknown CPU"
+end
+%>
+
+<fieldset class="cbi-section" id="overview_system">
+	<legend><%:System%></legend>
+	<table width="100%" cellspacing="10" summary="<%=board_name%>">
+		<tr><td width="33%"><%:Hostname%></td><td><%=hostname%></td></tr>
+		<tr><td><%:Model%></td><td><%=board_name%></td></tr>
+		<tr><td><%:Architecture%></td><td><%=luci.sys.exec("uname -m") or "?"%></td></tr>
+		<tr><td><%:CPU Model%></td><td><%=cpuinfo%></td></tr>
+		<tr><td><%:Firmware Version%></td><td><%=ver.distversion%> (<%=ver.luciversion%>)</td></tr>
+		<tr><td><%:Kernel Version%></td><td><%=stat.kernel or "?"%></td></tr>
+		<tr><td><%:Local Time%></td><td><%=os.date("%Y-%m-%d %H:%M:%S")%></td></tr>
+		<tr><td><%:Uptime%></td><td><%=luci.sys.uptime()%></td></tr>
+		<tr><td><%:Load Average%></td><td><%=loadavg[1]%>, <%=loadavg[2]%>, <%=loadavg[3]%></td></tr>
+		<% if dnsmasq ~= "0" then %>
+		<tr><td><%:DNSmasq%></td><td><%=dnsmasq%></td></tr>
+		<% end %>
+		<% if dropbear ~= "0" then %>
+		<tr><td><%:Dropbear%></td><td><%=dropbear%></td></tr>
+		<% end %>
+	</table>
+</fieldset>
+
+<fieldset class="cbi-section" id="overview_memory">
+	<legend><%:Memory%></legend>
+	<%
+	local meminfo = sys.meminfo()
+	local mem_total = meminfo.total or 0
+	local mem_free = (meminfo.free or 0) + (meminfo.cached or 0) + (meminfo.buffered or 0)
+	local mem_used = mem_total - mem_free
+	local mem_perc = (mem_used / mem_total) * 100
+	%>
+	<table width="100%" cellspacing="10">
+		<tr><td width="33%"><%:Total Available%></td><td><%=luci.sys.format_bytes(mem_total * 1024)%></td></tr>
+		<tr><td><%:Used%></td><td><%=luci.sys.format_bytes(mem_used * 1024)%> (<%=string.format("%.1f", mem_perc)%>%)</td></tr>
+		<tr><td><%:Free%></td><td><%=luci.sys.format_bytes(mem_free * 1024)%></td></tr>
+	</table>
+</fieldset>
+
+<fieldset class="cbi-section" id="overview_network">
+	<legend><%:Network%></legend>
+	<%
+	local netif = require "luci.model.network".init()
+	local wan4 = nil
+	local wan6 = nil
+	local wan_devices = {}
+	local interface
+
+	for _, iface in ipairs(netif:get_interfaces()) do
+		if iface:is_up() and not iface:is_bridge() and iface:proto() ~= "lo" then
+			if iface:proto() == "pppoe" or iface:proto() == "pptp" or iface:name() == "wan" or iface:name() == "wan6" then
+				local addrs4 = iface:ipaddrs()
+				local addrs6 = iface:ip6addrs()
+				if #addrs4 > 0 then
+					wan4 = addrs4[1]
+				end
+				if #addrs6 > 0 then
+					wan6 = addrs6[1]
+				end
+				table.insert(wan_devices, iface:name())
+			end
+		end
+	end
+
+	local function format_ip(addr)
+		if addr and #addr > 0 then
+			return addr[1]:string()
+		else
+			return "—"
+		end
+	end
+
+	interface = netif:get_interface("lan")
+	local lan4 = interface and interface:ipaddrs() or {}
+	local lan6 = interface and interface:ip6addrs() or {}
+	%>
+	<table width="100%" cellspacing="10">
+		<tr><td width="33%"><%:IPv4 WAN%></td><td><%=wan4 and wan4:string() or "—"%></td></tr>
+		<tr><td><%:IPv6 WAN%></td><td><%=wan6 and wan6:string() or "—"%></td></tr>
+		<tr><td><%:IPv4 LAN%></td><td><%=format_ip(lan4)%></td></tr>
+		<tr><td><%:IPv6 LAN%></td><td><%=format_ip(lan6)%></td></tr>
+	</table>
+</fieldset>
+
+<fieldset class="cbi-section" id="overview_wireless">
+	<legend><%:Wireless%></legend>
+	<%
+	local wnet = require "luci.model.network".init()
+	local has_wlan = false
+	local wifis = {}
+	for _, iface in ipairs(wnet:get_wifis()) do
+		if iface:is_up() then
+			has_wlan = true
+			local ssid = iface:get_ssid() or "?"
+			local channel = iface:get_channel() or "?"
+			local quality = iface:get_signal_quality() or 0
+			table.insert(wifis, {ssid=ssid, channel=channel, quality=quality})
+		end
+	end
+	if has_wlan then
+	%>
+	<table width="100%" cellspacing="10">
+		<tr><th width="33%"><%:SSID%></th><th><%:Channel%></th><th><%:Signal%></th></tr>
+		<% for _, w in ipairs(wifis) do %>
+		<tr><td><%=w.ssid%></td><td><%=w.channel%></td><td><%=w.quality%>%</td></tr>
+		<% end %>
+	</table>
+	<% else %>
+	<p><em><%:No wireless interface found.%></em></p>
+	<% end %>
+</fieldset>
