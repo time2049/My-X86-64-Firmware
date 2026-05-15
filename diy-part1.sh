@@ -10,15 +10,29 @@
 # Description: OpenWrt DIY script part 1 (Before Update feeds)
 #
 
-# 1. 添加 PassWall 源（使用 main 分支以适配最新内核）
-echo 'src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main' >> feeds.conf.default
-echo 'src-git passwall_luci https://github.com/Openwrt-Passwall/openwrt-passwall.git;main' >> feeds.conf.default
+# 防止重复添加相同源的函数
+add_feed() {
+    local feed_line="$1"
+    if ! grep -Fxq "$feed_line" feeds.conf.default; then
+        echo "$feed_line" >> feeds.conf.default
+        echo "✅ 已添加源: $feed_line"
+    else
+        echo "⚠️ 源已存在，跳过: $feed_line"
+    fi
+}
 
-# 2. 添加 OpenClash 源（全能代理必备）
-echo 'src-git openclash https://github.com/vernesong/OpenClash.git' >> feeds.conf.default
+# 1. 添加 PassWall 相关源（使用 master 分支，稳定）
+add_feed 'src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;master'
+add_feed 'src-git passwall_luci https://github.com/Openwrt-Passwall/openwrt-passwall.git;master'
+# 可选：如果需要额外 PassWall 组件，取消注释下面一行
+# add_feed 'src-git passwall_spec https://github.com/Openwrt-PassWall/openwrt-passwall-spec.git'
 
-# 3. 添加 Argon 主题及其配置插件
-echo 'src-git argon https://github.com/jerrykuku/luci-theme-argon.git' >> feeds.conf.default
-echo 'src-git argonconfig https://github.com/jerrykuku/luci-app-argon-config.git' >> feeds.conf.default
+# 2. 添加 OpenClash 源（使用 master 分支）
+add_feed 'src-git openclash https://github.com/vernesong/OpenClash.git;master'
 
-# 4. (可选) 如果你需要更多插件，可以在下方继续添加
+# 3. 添加 Argon 主题及其配置插件（使用 master 分支）
+add_feed 'src-git argon https://github.com/jerrykuku/luci-theme-argon.git;master'
+add_feed 'src-git argonconfig https://github.com/jerrykuku/luci-app-argon-config.git;master'
+
+# 4. (可选) 如果你需要更多插件，可以在下方按照相同格式继续添加
+# add_feed 'src-git example https://github.com/example/example.git;branch'
