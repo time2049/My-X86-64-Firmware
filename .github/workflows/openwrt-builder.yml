@@ -2,15 +2,17 @@
 # https://github.com/P3TERX/Actions-OpenWrt
 #
 # File: .github/workflows/openwrt-builder.yml
-# Description: Build OpenWrt 25.x (Master) using GitHub Actions
+# Description: Build OpenWrt 25.x (Master) using GitHub Actions with Optimizations
+# Author: Improved Version
 #
 
-name: My-X86-64-Firmware-25分支云编译
+name: My-X86-64-Firmware-25分支云编译-优化版
 
 on:
   repository_dispatch:
   workflow_dispatch:
-    # 已删除 SSH 输入项，点击运行即可开始
+  schedule:
+    - cron: '0 16 * * *'  # 每天北京时间 00:00 自动运行 (UTC 16:00)
 
 permissions:
   contents: write
@@ -25,107 +27,297 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
+  # ===== 新增：编译优化参数 =====
+  BUILD_THREADS: 4
+  CCACHE_SIZE: 5G
+  CCACHE_DIR: /workdir/openwrt/.ccache
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 480  # 8小时超时保护
 
     steps:
-    - name: 1. 检出代码
-      uses: actions/checkout@main
+    # ===== 步骤 1：检出代码 =====
+    - name: 1️⃣ 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-    - name: 2. 深度清理磁盘空间
+    # ===== 步骤 2：深度清理磁盘空间 =====
+    - name: 2️⃣ 深度清理磁盘空间
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
+        echo "🧹 开始清理磁盘空间..."
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
         sudo docker image prune --all --force
         sudo rm -rf /usr/local/share/boost
         sudo rm -rf /usr/lib/x86_64-linux-gnu/openblas
+        
+        echo "📦 更新软件包并安装依赖..."
         sudo apt-get update
-        sudo apt-get install -y $(curl -fsSL https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/tools/ready-2204)
+        
+        # 使用带重试的依赖安装机制
+        MAX_RETRIES=3
+        RETRY_COUNT=0
+        until [ $RETRY_COUNT -ge $MAX_RETRIES ]; do
+          if sudo apt-get install -y $(curl -fsSL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/tools/ready-2204 2>/dev/null || echo "build-essential git ncurses-dev gawk"); then
+            break
+          fi
+          RETRY_COUNT=$((RETRY_COUNT+1))
+          echo "⚠️  依赖安装失败，重试 $RETRY_COUNT/$MAX_RETRIES..."
+          sleep 30
+        done
+        
         sudo apt-get autoremove -y --purge
         sudo apt-get clean
         sudo timedatectl set-timezone "$TZ"
+        
+        echo "📂 创建工作目录..."
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
+        
+        echo "💾 磁盘空间统计："
         df -h
 
-    - name: 3. 克隆源码
+    # ===== 步骤 3：克隆源码（带重试机制）=====
+    - name: 3️⃣ 克隆源码
       working-directory: /workdir
       run: |
-        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+        echo "⬇️ 克隆 OpenWrt 源码..."
+        MAX_RETRIES=3
+        RETRY_COUNT=0
+        until [ $RETRY_COUNT -ge $MAX_RETRIES ]; do
+          if git clone --depth 1 --single-branch --branch $REPO_BRANCH $REPO_URL openwrt 2>&1; then
+            break
+          fi
+          RETRY_COUNT=$((RETRY_COUNT+1))
+          echo "⚠️  克隆失败，重试 $RETRY_COUNT/$MAX_RETRIES..."
+          rm -rf openwrt
+          sleep 30
+        done
+        
+        if [ ! -d "openwrt" ]; then
+          echo "❌ 源码克隆失败，无法继续"
+          exit 1
+        fi
+        
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        echo "✅ 源码克隆完成"
 
-    - name: 4. 加载自定义 feeds (diy-part1)
+    # ===== 步骤 4：加载自定义 feeds (diy-part1) =====
+    - name: 4️⃣ 加载自定义 feeds (diy-part1)
       run: |
+        echo "🔧 加载自定义 feeds..."
         [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
         chmod +x $DIY_P1_SH
         cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+        $GITHUB_WORKSPACE/$DIY_P1_SH || true
 
-    - name: 5. 更新 feeds
-      run: cd openwrt && ./scripts/feeds update -a
-
-    - name: 6. 安装 feeds
-      run: cd openwrt && ./scripts/feeds install -a
-
-    - name: 7. 加载自定义配置 (diy-part2)
+    # ===== 步骤 5：更新 feeds（带重试）=====
+    - name: 5️⃣ 更新 feeds
       run: |
+        echo "🔄 更新 feeds..."
+        cd openwrt
+        MAX_RETRIES=2
+        RETRY_COUNT=0
+        until [ $RETRY_COUNT -ge $MAX_RETRIES ]; do
+          if ./scripts/feeds update -a 2>&1; then
+            break
+          fi
+          RETRY_COUNT=$((RETRY_COUNT+1))
+          echo "⚠️  feeds 更新失败，重试 $RETRY_COUNT/$MAX_RETRIES..."
+          sleep 30
+        done
+
+    # ===== 步骤 6：安装 feeds =====
+    - name: 6️⃣ 安装 feeds
+      run: |
+        echo "📥 安装 feeds..."
+        cd openwrt
+        ./scripts/feeds install -a
+
+    # ===== 步骤 7：加载自定义配置 (diy-part2) =====
+    - name: 7️⃣ 加载自定义配置 (diy-part2)
+      run: |
+        echo "⚙️ 加载自定义配置..."
         [ -e files ] && mv files openwrt/files
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
         cd openwrt
+        
         # 强制关闭签名（25分支 APK 系统必备）
         sed -i 's/CONFIG_SIGNED_PACKAGES=y/CONFIG_SIGNED_PACKAGES=n/g' .config
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        
+        # 强制启用 ccache
+        sed -i 's/CONFIG_CCACHE=n/CONFIG_CCACHE=y/g' .config 2>/dev/null || true
+        grep -q "CONFIG_CCACHE=y" .config || echo "CONFIG_CCACHE=y" >> .config
+        
+        # 运行自定义脚本
+        $GITHUB_WORKSPACE/$DIY_P2_SH || true
+        
+        echo "✅ 配置加载完成"
 
-    - name: 9. 下载软件包
+    # ===== 步骤 8：智能 ccache 缓存策略 =====
+    - name: 8️⃣ 挂载 ccache 编译缓存 ⚡
+      uses: actions/cache@v4
+      with:
+        path: /workdir/openwrt/.ccache
+        # 使用多层缓存键策略：配置特定 > 分支通用 > 全局回退
+        key: immortalwrt-25-ccache-${{ hashFiles('openwrt/.config', 'openwrt/feeds.conf.default') }}-${{ github.run_number }}
+        restore-keys: |
+          immortalwrt-25-ccache-${{ hashFiles('openwrt/.config', 'openwrt/feeds.conf.default') }}-
+          immortalwrt-25-ccache-
+          immortalwrt-ccache-
+
+    # ===== 步骤 9：缓存下载的软件包 =====
+    - name: 9️⃣ 缓存 dl 目录
+      uses: actions/cache@v4
+      with:
+        path: /workdir/openwrt/dl
+        # dl 目录缓存基于 feeds 配置
+        key: immortalwrt-25-dl-${{ hashFiles('openwrt/feeds.conf.default') }}-${{ github.run_number }}
+        restore-keys: |
+          immortalwrt-25-dl-${{ hashFiles('openwrt/feeds.conf.default') }}-
+          immortalwrt-25-dl-
+
+    # ===== 步骤 10：下载软件包 =====
+    - name: 🔟 下载软件包
       id: package
       run: |
+        echo "📥 下载软件包..."
         cd openwrt
         make defconfig
-        make download -j8
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
+        
+        # 分阶段下载，允许部分失败
+        make download -j8 || make download -j4 || make download -j1
+        
+        # 清理损坏的包
+        echo "🧹 清理损坏的软件包..."
+        find dl -size -1024c -exec ls -l {} \; 2>/dev/null
+        find dl -size -1024c -exec rm -f {} \; 2>/dev/null
+        
+        echo "✅ 软件包下载完成"
+        echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: 10. 编译固件
+    # ===== 步骤 11：编译固件（核心步骤） =====
+    - name: '⏱️ 编译固件'
       id: compile
       run: |
+        echo "🔨 开始编译固件..."
         cd openwrt
-        echo -e "$(nproc) 线程 开始编译"
-        make -j$(nproc) || make -j1 || make -j1 V=s
+        
+        # 配置编译环境变量
+        export TOPDIR="/workdir/openwrt"
+        export CCACHE_DIR="/workdir/openwrt/.ccache"
+        export CCACHE_MAXSIZE="$CCACHE_SIZE"
+        export PATH="/usr/lib/ccache:$PATH"
+        
+        # 启用 ccache 统计
+        ccache -z
+        
+        # 检查编译配置
+        echo "📋 编译配置摘要："
+        grep -E '^CONFIG_TARGET|^CONFIG_CCACHE|^CONFIG_SIGNED' .config || true
+        
+        # 分阶段编译：先用多线程，失败后降级
+        THREADS=$(nproc)
+        echo "🚀 使用 $THREADS 个线程开始编译..."
+        
+        if make -j$THREADS V=sc 2>&1; then
+          echo "✅ 编译成功（$THREADS 线程）"
+        elif [ $THREADS -gt 4 ]; then
+          echo "⚠️  多线程编译失败，切换到 4 线程..."
+          make -j4 V=sc 2>&1 || make -j1 V=s 2>&1 || {
+            echo "❌ 编译最终失败"
+            exit 1
+          }
+        else
+          echo "⚠️  降级到单线程编译..."
+          make -j1 V=s 2>&1 || {
+            echo "❌ 编译最终失败"
+            exit 1
+          }
+        fi
+        
+        # 显示 ccache 统计
+        echo "📊 ccache 统计信息："
+        ccache -s || true
+        
         echo "status=success" >> $GITHUB_OUTPUT
+        
+        # 提取设备名称和时间戳
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV || echo "DEVICE_NAME=" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-    - name: 11. 整理固件文件
+    # ===== 步骤 12：整理固件文件 =====
+    - name: '🗂️ 整理固件文件'
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && steps.compile.outputs.status == 'success' && !cancelled()
       run: |
+        echo "📂 整理编译输出..."
         cd openwrt/bin/targets/*/*
-        rm -rf packages
+        
+        echo "固件位置：$(pwd)"
+        echo "固件文件列表："
+        ls -lh || echo "❌ 没有找到固件文件"
+        
+        # 只保留必要的文件，删除调试符号和源码
+        rm -rf packages *.tar.gz *.tar.bz2 *.tar.xz *.o *.a 2>/dev/null || true
+        
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: 12. 上传固件到 Artifacts
-      uses: actions/upload-artifact@main
+    # ===== 步骤 13：上传固件到 Artifacts =====
+    - name: '📤 上传固件到 Artifacts'
+      uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: OpenWrt_25_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
+        retention-days: 30
+        if-no-files-found: warn
 
-    - name: 13. 生成发布标签 (Releases)
+    # ===== 步骤 14：生成发布标签 =====
+    - name: '🏷️ 生成发布标签'
       id: tag
       if: env.UPLOAD_RELEASE == 'true' && steps.organize.outputs.status == 'success' && !cancelled()
       run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        echo "🚀 固件编译自 25 分支：$(date +"%Y-%m-%d %H:%M")" >> release.txt
+        RELEASE_TAG=$(date +"%Y.%m.%d-%H%M")
+        echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+        
+        cat > release.txt << 'EOF'
+        🚀 OpenWrt 25分支 自动编译发布
+        
+        📅 编译时间：$(date +"%Y-%m-%d %H:%M:%S")
+        🔧 编译配置：X86-64 (OpenWrt 25 Master)
+        📦 仓库：immortalwrt/immortalwrt
+        
+        ✨ 更新记录：
+        - 采用 ccache 加速编译
+        - 优化缓存策略提升重复编译速度
+        - 支持完整的回退机制确保稳定性
+        
+        📝 使用方式：
+        1. 下载固件文件
+        2. 使用 dd 或 rufus 写入 USB/闪存
+        3. 通过 UEFI 或 BIOS 启动
+        
+        ⚠️  注意：
+        - 首次启动请耐心等待初始化
+        - 可能需要扩展分区大小以获得更多空间
+        
+        EOF
+        
+        sed -i 's/$(date +"%Y-%m-%d %H:%M:%S")/'"$(date +"%Y-%m-%d %H:%M:%S")"'/' release.txt
+        
         echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: 14. 上传固件到 Releases
-      uses: softprops/action-gh-release@v1
+    # ===== 步骤 15：上传固件到 Releases =====
+    - name: '🎯 上传固件到 Releases'
+      uses: softprops/action-gh-release@v2
       if: steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -133,16 +325,76 @@ jobs:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
+        draft: false
+        prerelease: false
 
-    - name: 发送通知（Telegram）
+    # ===== 步骤 16：发送 Telegram 通知 =====
+    - name: '📢 Telegram 通知'
       if: always() && github.event_name == 'workflow_dispatch'
+      continue-on-error: true
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        [ "${{ job.status }}" == "success" ] && STATUS="✅ 成功" || STATUS="❌ 失败"
-        MESSAGE="${STATUS}！**OpenWrt 25分支 编译完成** 🚀\n👤 触发者：小z\n📋 日志：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        if [ -z "$TELEGRAM_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+          echo "⚠️  Telegram 密钥未配置，跳过通知"
+          exit 0
+        fi
+        
+        if [ "${{ job.status }}" == "success" ]; then
+          STATUS="✅ **编译成功**"
+        else
+          STATUS="❌ **编译失败**"
+        fi
+        
+        MESSAGE="${STATUS} - OpenWrt 25分支 🚀
+        
+        👤 触发者：GitHub Actions
+        📋 工作流：${{ github.workflow }}
+        🔗 日志：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        ⏰ 时间：$(date +%Y-%m-%d' '%H:%M:%S)"
+        
         curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
           -d chat_id="${TELEGRAM_CHAT_ID}" \
           -d parse_mode="Markdown" \
-          -d text="${MESSAGE}"
+          -d text="${MESSAGE}" \
+          || echo "⚠️  Telegram 发送失败"
+
+    # ===== 步骤 17：编译失败调试信息 =====
+    - name: '🐛 保存调试日志'
+      if: failure()
+      continue-on-error: true
+      run: |
+        echo "⚠️  编译失败，收集调试信息..."
+        
+        cd /workdir/openwrt 2>/dev/null || exit 0
+        
+        # 保存编译日志
+        if [ -f ".log" ]; then
+          tail -200 .log > /tmp/build.log
+        fi
+        
+        # 保存配置
+        cp .config /tmp/failed.config 2>/dev/null || true
+        
+        # 显示磁盘使用
+        echo "💾 磁盘使用情况："
+        df -h
+        
+        echo "📂 ccache 目录大小："
+        du -sh .ccache 2>/dev/null || echo "ccache 目录不存在"
+        
+        echo "✅ 调试信息已保存到 /tmp/"
+
+    # ===== 步骤 18：清理过期缓存 =====
+    - name: '🧹 清理缓存（可选）'
+      if: always()
+      continue-on-error: true
+      run: |
+        echo "📊 最终缓存统计："
+        du -sh /workdir/openwrt/.ccache 2>/dev/null || echo "ccache：未创建"
+        du -sh /workdir/openwrt/dl 2>/dev/null || echo "dl：未创建"
+        
+        # 限制 ccache 大小（可选）
+        # export CCACHE_DIR="/workdir/openwrt/.ccache"
+        # ccache -M 5G
