@@ -44,7 +44,7 @@ jobs:
       with:
         fetch-depth: 0
 
-    # ===== 步骤 2：深度清理磁盘空间 =====
+    # ===== 步骤 2：深度清理磁盘空间并安装依赖 =====
     - name: 2️⃣ 深度清理磁盘空间
       env:
         DEBIAN_FRONTEND: noninteractive
@@ -62,7 +62,8 @@ jobs:
         MAX_RETRIES=3
         RETRY_COUNT=0
         until [ $RETRY_COUNT -ge $MAX_RETRIES ]; do
-          if sudo apt-get install -y $(curl -fsSL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/tools/ready-2204 2>/dev/null || echo "build-essential git ncurses-dev gawk"); then
+          # 💡 这里强行加上了 ccache，确保环境里一定有该命令
+          if sudo apt-get install -y ccache $(curl -fsSL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/tools/ready-2204 2>/dev/null || echo "build-essential git ncurses-dev gawk"); then
             break
           fi
           RETRY_COUNT=$((RETRY_COUNT+1))
@@ -394,7 +395,3 @@ jobs:
         echo "📊 最终缓存统计："
         du -sh /workdir/openwrt/.ccache 2>/dev/null || echo "ccache：未创建"
         du -sh /workdir/openwrt/dl 2>/dev/null || echo "dl：未创建"
-        
-        # 限制 ccache 大小（可选）
-        # export CCACHE_DIR="/workdir/openwrt/.ccache"
-        # ccache -M 5G
