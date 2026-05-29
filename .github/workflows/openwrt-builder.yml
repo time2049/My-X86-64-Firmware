@@ -27,7 +27,7 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
-  # ===== 新增：编译优化参数 =====
+  # ===== 编译优化参数 =====
   BUILD_THREADS: 4
   CCACHE_SIZE: 5G
   CCACHE_DIR: /workdir/openwrt/.ccache
@@ -62,7 +62,6 @@ jobs:
         MAX_RETRIES=3
         RETRY_COUNT=0
         until [ $RETRY_COUNT -ge $MAX_RETRIES ]; do
-          # 💡 这里强行加上了 ccache，确保环境里一定有该命令
           if sudo apt-get install -y ccache $(curl -fsSL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/tools/ready-2204 2>/dev/null || echo "build-essential git ncurses-dev gawk"); then
             break
           fi
@@ -165,7 +164,6 @@ jobs:
       uses: actions/cache@v4
       with:
         path: /workdir/openwrt/.ccache
-        # 使用多层缓存键策略：配置特定 > 分支通用 > 全局回退
         key: immortalwrt-25-ccache-${{ hashFiles('openwrt/.config', 'openwrt/feeds.conf.default') }}-${{ github.run_number }}
         restore-keys: |
           immortalwrt-25-ccache-${{ hashFiles('openwrt/.config', 'openwrt/feeds.conf.default') }}-
@@ -177,7 +175,6 @@ jobs:
       uses: actions/cache@v4
       with:
         path: /workdir/openwrt/dl
-        # dl 目录缓存基于 feeds 配置
         key: immortalwrt-25-dl-${{ hashFiles('openwrt/feeds.conf.default') }}-${{ github.run_number }}
         restore-keys: |
           immortalwrt-25-dl-${{ hashFiles('openwrt/feeds.conf.default') }}-
@@ -206,9 +203,47 @@ jobs:
     - name: '⏱️ 编译固件'
       id: compile
       run: |
-        echo "🔨 开始编译固件..."
         cd openwrt
         
+        # 📣 ===== 插入验证成功的：TG 开始编译通知 =====
+        echo "📢 尝试发送开始编译通知..."
+        if [ -n "${{ secrets.TELEGRAM_TOKEN }}" ] && [ -n "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          # 获取设备名称
+          DEVICE=$(grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/')
+          [ -z "$DEVICE" ] && DEVICE="X86_64 标准版"
+          
+          # 转义敏感字符防止 MarkdownV2 语法炸胡
+          SAFE_DEVICE=$(echo "$DEVICE" | sed 's/_/\\_/g' | sed 's/-/\\-/g' | sed 's/\./\\./g')
+          SAFE_WORKFLOW=$(echo "${{ github.workflow }}" | sed 's/_/\\_/g' | sed 's/-/\\-/g' | sed 's/\./\\./g')
+          
+          # 拼接通知内容
+          read -r -d '' START_MSG << EOF || true
+        🚀 *OpenWrt 25分支 开始编译！*
+        
+        📟 *编译设备*：${SAFE_DEVICE}
+        📋 *工作流名*：${SAFE_WORKFLOW}
+        ⏰ *开始时间*：$(date '+%Y-%m-%d %H:%M:%S')
+        
+        🛠️ 固件正在火速构建中，请耐心等待...
+        ⚠️ [点击直达 Actions 网页看实时进度](${RUN_URL})
+        EOF
+          
+          # 核心安全：用 jq 打包成标准的 JSON Payload
+          START_JSON=$(jq -n \
+            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --arg text "$START_MSG" \
+            '{chat_id: $chat_id, text: $text, parse_mode: "MarkdownV2", disable_web_page_preview: true}')
+            
+          # 发送 POST 请求
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$START_JSON" > /dev/null || echo "⚠️ 开始通知发送失败"
+        fi
+        # ============================================================
+        
+        echo "🔨 开始编译固件..."
         # 配置编译环境变量
         export TOPDIR="/workdir/openwrt"
         export CCACHE_DIR="/workdir/openwrt/.ccache"
@@ -329,37 +364,80 @@ jobs:
         draft: false
         prerelease: false
 
-    # ===== 步骤 16：发送 Telegram 通知 =====
+    # ===== 步骤 16：发送 Telegram 通知（已同步升级为安全 jq 引擎） =====
     - name: '📢 Telegram 通知'
-      if: always() && github.event_name == 'workflow_dispatch'
+      if: always()
       continue-on-error: true
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
-        if [ -z "$TELEGRAM_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+        if [ -z "${TELEGRAM_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
           echo "⚠️  Telegram 密钥未配置，跳过通知"
           exit 0
         fi
-        
-        if [ "${{ job.status }}" == "success" ]; then
-          STATUS="✅ **编译成功**"
+
+        # 确定状态标识
+        if [ "${{ steps.compile.outputs.status }}" = "success" ]; then
+          STATUS="✅ *OpenWrt 25分支 编译成功！*"
         else
-          STATUS="❌ **编译失败**"
+          STATUS="❌ *OpenWrt 25分支 编译失败！*"
         fi
-        
-        MESSAGE="${STATUS} - OpenWrt 25分支 🚀
-        
-        👤 触发者：GitHub Actions
-        📋 工作流：${{ github.workflow }}
-        🔗 日志：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        ⏰ 时间：$(date +%Y-%m-%d' '%H:%M:%S)"
-        
+
+        # 获取设备名称
+        if [ -f openwrt/.config ]; then
+          DEVICE=$(grep '^CONFIG_TARGET.*DEVICE.*=y' openwrt/.config | sed -r 's/.*DEVICE_(.*)=y/\1/')
+          [ -z "$DEVICE" ] && DEVICE="X86_64 标准版"
+        else
+          DEVICE="X86_64 标准版"
+        fi
+
+        # 构造发布链接
+        RELEASE_URL=""
+        if [ "${{ steps.compile.outputs.status }}" = "success" ] && [ "${{ steps.tag.outputs.status }}" = "success" ]; then
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }}"
+        fi
+
+        # 转义敏感字符防止 MarkdownV2 解析失败
+        SAFE_DEVICE=$(echo "$DEVICE" | sed 's/_/\\_/g' | sed 's/-/\\-/g' | sed 's/\./\\./g')
+        SAFE_WORKFLOW=$(echo "${{ github.workflow }}" | sed 's/_/\\_/g' | sed 's/-/\\-/g' | sed 's/\./\\./g')
+
+        # 拼接最终完工的通知内容文本
+        if [ -n "$RELEASE_URL" ]; then
+          read -r -d '' MSG << EOF || true
+        📢 ${STATUS}
+
+        👤 *触发来源*：GitHub Actions
+        📟 *编译设备*：${SAFE_DEVICE}
+        📋 *工作流名*：${SAFE_WORKFLOW}
+        ⏰ *结束时间*：$(date '+%Y-%m-%d %H:%M:%S')
+
+        📥 [点击去 Release 页面下载固件](${RELEASE_URL})
+        ⚠️ [点击直达详细编译日志](${RUN_URL})
+        EOF
+        else
+          read -r -d '' MSG << EOF || true
+        📢 ${STATUS}
+
+        👤 *触发来源*：GitHub Actions
+        📟 *编译设备*：${SAFE_DEVICE}
+        📋 *工作流名*：${SAFE_WORKFLOW}
+        ⏰ *结束时间*：$(date '+%Y-%m-%d %H:%M:%S')
+
+        ⚠️ [点击直达详细编译日志](${RUN_URL})
+        EOF
+        fi
+
+        # 使用 jq 安全打包并推送，全面杜绝 Markdown 特殊符号导致的不报错也收不到问题
+        JSON_PAYLOAD=$(jq -n \
+          --arg chat_id "${TELEGRAM_CHAT_ID}" \
+          --arg text "$MSG" \
+          '{chat_id: $chat_id, text: $text, parse_mode: "MarkdownV2", disable_web_page_preview: false}')
+
         curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-          -d chat_id="${TELEGRAM_CHAT_ID}" \
-          -d parse_mode="Markdown" \
-          -d text="${MESSAGE}" \
-          || echo "⚠️  Telegram 发送失败"
+          -H "Content-Type: application/json" \
+          -d "$JSON_PAYLOAD" > /dev/null || echo "⚠️ 结束通知发送失败"
 
     # ===== 步骤 17：编译失败调试信息 =====
     - name: '🐛 保存调试日志'
@@ -367,24 +445,13 @@ jobs:
       continue-on-error: true
       run: |
         echo "⚠️  编译失败，收集调试信息..."
-        
         cd /workdir/openwrt 2>/dev/null || exit 0
-        
-        # 保存编译日志
         if [ -f ".log" ]; then
           tail -200 .log > /tmp/build.log
         fi
-        
-        # 保存配置
         cp .config /tmp/failed.config 2>/dev/null || true
-        
-        # 显示磁盘使用
-        echo "💾 磁盘使用情况："
         df -h
-        
-        echo "📂 ccache 目录大小："
         du -sh .ccache 2>/dev/null || echo "ccache 目录不存在"
-        
         echo "✅ 调试信息已保存到 /tmp/"
 
     # ===== 步骤 18：清理过期缓存 =====
