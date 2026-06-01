@@ -45,7 +45,7 @@ jobs:
         fetch-depth: 0
 
     # ===== 步骤 2：深度清理磁盘空间并安装依赖 =====
-    - name: 2️⃣ 深度清理磁盘空间
+    - name: 2️⃣ 深度清理磁盘空间并初始化环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -62,7 +62,7 @@ jobs:
         MAX_RETRIES=3
         RETRY_COUNT=0
         until [ $RETRY_COUNT -ge $MAX_RETRIES ]; do
-          if sudo apt-get install -y ccache $(curl -fsSL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/tools/ready-2204 2>/dev/null || echo "build-essential git ncurses-dev gawk"); then
+          if sudo apt-get install -y ccache curl jq $(curl -fsSL --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/tools/ready-2204 2>/dev/null || echo "build-essential git ncurses-dev gawk"); then
             break
           fi
           RETRY_COUNT=$((RETRY_COUNT+1))
@@ -73,6 +73,10 @@ jobs:
         sudo apt-get autoremove -y --purge
         sudo apt-get clean
         sudo timedatectl set-timezone "$TZ"
+        
+        # 提取服务器硬件信息供 TG 通知使用
+        echo "SERVER_CPU=$(lscpu | grep 'Model name' | cut -d: -f2 | xargs)" >> $GITHUB_ENV
+        echo "SERVER_CORES=$(nproc)" >> $GITHUB_ENV
         
         echo "📂 创建工作目录..."
         sudo mkdir -p /workdir
@@ -205,41 +209,19 @@ jobs:
       run: |
         cd openwrt
         
-        # 📣 ===== 插入验证成功的：TG 开始编译通知 =====
+        # 📣 ===== 替换为验证成功的：TG 开始编译通知 =====
         echo "📢 尝试发送开始编译通知..."
         if [ -n "${{ secrets.TELEGRAM_TOKEN }}" ] && [ -n "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          
-          # 获取设备名称
+          NOW_TIME=$(date '+%Y-%m-%d %H:%M:%S')
           DEVICE=$(grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/')
           [ -z "$DEVICE" ] && DEVICE="X86_64 标准版"
           
-          # 转义敏感字符防止 MarkdownV2 语法炸胡
-          SAFE_DEVICE=$(echo "$DEVICE" | sed 's/_/\\_/g' | sed 's/-/\\-/g' | sed 's/\./\\./g')
-          SAFE_WORKFLOW=$(echo "${{ github.workflow }}" | sed 's/_/\\_/g' | sed 's/-/\\-/g' | sed 's/\./\\./g')
+          MSG="🚀 *OpenWrt 25分支 编译开始*\n\n📟 设备: ${DEVICE}\n🕒 时间: ${NOW_TIME}\n💻 CPU: ${SERVER_CPU}\n🧩 核心: ${SERVER_CORES}\n📦 仓库: ${GITHUB_REPOSITORY}"
           
-          # 拼接通知内容
-          read -r -d '' START_MSG << EOF || true
-        🚀 *OpenWrt 25分支 开始编译！*
-        
-        📟 *编译设备*：${SAFE_DEVICE}
-        📋 *工作流名*：${SAFE_WORKFLOW}
-        ⏰ *开始时间*：$(date '+%Y-%m-%d %H:%M:%S')
-        
-        🛠️ 固件正在火速构建中，请耐心等待...
-        ⚠️ [点击直达 Actions 网页看实时进度](${RUN_URL})
-        EOF
-          
-          # 核心安全：用 jq 打包成标准的 JSON Payload
-          START_JSON=$(jq -n \
-            --arg chat_id "${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --arg text "$START_MSG" \
-            '{chat_id: $chat_id, text: $text, parse_mode: "MarkdownV2", disable_web_page_preview: true}')
-            
-          # 发送 POST 请求
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-            -H "Content-Type: application/json" \
-            -d "$START_JSON" > /dev/null || echo "⚠️ 开始通知发送失败"
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="$MSG" \
+            -d parse_mode="Markdown"
         fi
         # ============================================================
         
@@ -364,28 +346,27 @@ jobs:
         draft: false
         prerelease: false
 
-    # ===== 步骤 16：发送 Telegram 通知（已同步升级为安全 jq 引擎） =====
-    - name: '📢 Telegram 通知'
+    # ===== 步骤 16：发送 Telegram 结束通知（已同步替换为验证通过的经典 Markdown 引擎） =====
+    - name: '📢 Telegram 结束通知'
       if: always()
       continue-on-error: true
       env:
-        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
-        if [ -z "${TELEGRAM_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
+        if [ -z "${TELEGRAM_BOT_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
           echo "⚠️  Telegram 密钥未配置，跳过通知"
           exit 0
         fi
 
-        # 确定状态标识
+        NOW_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+
         if [ "${{ steps.compile.outputs.status }}" = "success" ]; then
           STATUS="✅ *OpenWrt 25分支 编译成功！*"
         else
           STATUS="❌ *OpenWrt 25分支 编译失败！*"
         fi
 
-        # 获取设备名称
         if [ -f openwrt/.config ]; then
           DEVICE=$(grep '^CONFIG_TARGET.*DEVICE.*=y' openwrt/.config | sed -r 's/.*DEVICE_(.*)=y/\1/')
           [ -z "$DEVICE" ] && DEVICE="X86_64 标准版"
@@ -393,51 +374,14 @@ jobs:
           DEVICE="X86_64 标准版"
         fi
 
-        # 构造发布链接
-        RELEASE_URL=""
-        if [ "${{ steps.compile.outputs.status }}" = "success" ] && [ "${{ steps.tag.outputs.status }}" = "success" ]; then
-          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }}"
-        fi
+        # 拼接稳定版精简通知文本
+        MSG="${STATUS}\n\n📟 设备: ${DEVICE}\n🕒 时间: ${NOW_TIME}\n📦 仓库: ${GITHUB_REPOSITORY}"
 
-        # 转义敏感字符防止 MarkdownV2 解析失败
-        SAFE_DEVICE=$(echo "$DEVICE" | sed 's/_/\\_/g' | sed 's/-/\\-/g' | sed 's/\./\\./g')
-        SAFE_WORKFLOW=$(echo "${{ github.workflow }}" | sed 's/_/\\_/g' | sed 's/-/\\-/g' | sed 's/\./\\./g')
-
-        # 拼接最终完工的通知内容文本
-        if [ -n "$RELEASE_URL" ]; then
-          read -r -d '' MSG << EOF || true
-        📢 ${STATUS}
-
-        👤 *触发来源*：GitHub Actions
-        📟 *编译设备*：${SAFE_DEVICE}
-        📋 *工作流名*：${SAFE_WORKFLOW}
-        ⏰ *结束时间*：$(date '+%Y-%m-%d %H:%M:%S')
-
-        📥 [点击去 Release 页面下载固件](${RELEASE_URL})
-        ⚠️ [点击直达详细编译日志](${RUN_URL})
-        EOF
-        else
-          read -r -d '' MSG << EOF || true
-        📢 ${STATUS}
-
-        👤 *触发来源*：GitHub Actions
-        📟 *编译设备*：${SAFE_DEVICE}
-        📋 *工作流名*：${SAFE_WORKFLOW}
-        ⏰ *结束时间*：$(date '+%Y-%m-%d %H:%M:%S')
-
-        ⚠️ [点击直达详细编译日志](${RUN_URL})
-        EOF
-        fi
-
-        # 使用 jq 安全打包并推送，全面杜绝 Markdown 特殊符号导致的不报错也收不到问题
-        JSON_PAYLOAD=$(jq -n \
-          --arg chat_id "${TELEGRAM_CHAT_ID}" \
-          --arg text "$MSG" \
-          '{chat_id: $chat_id, text: $text, parse_mode: "MarkdownV2", disable_web_page_preview: false}')
-
-        curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-          -H "Content-Type: application/json" \
-          -d "$JSON_PAYLOAD" > /dev/null || echo "⚠️ 结束通知发送失败"
+        # 通过验证成功的经典表单形式推送
+        curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d text="$MSG" \
+          -d parse_mode="Markdown"
 
     # ===== 步骤 17：编译失败调试信息 =====
     - name: '🐛 保存调试日志'
