@@ -67,12 +67,19 @@ jobs:
         sed -i 's/CONFIG_CCACHE=n/CONFIG_CCACHE=y/g' .config || echo "CONFIG_CCACHE=y" >> .config
         make defconfig
 
-    - name: 5️⃣ TG 通知：编译开始
+    - name: 📢 TG 通知：编译开始
       if: always()
       run: |
+        # 使用变量引用，注意把 TELEGRAM_BOT_TOKEN 换成你仓库里实际的名字
+        BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}"
+        CHAT_ID="${{ secrets.TELEGRAM_CHAT_ID }}"
         MSG="🚀 *OpenWrt 编译开始*%0A📟 设备: X86-64%0A🕒 时间: $(date '+%Y-%m-%d %H:%M:%S')"
-        curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=$MSG&parse_mode=Markdown"
-
+        
+        curl -s "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+          -d "chat_id=${CHAT_ID}" \
+          -d "text=${MSG}" \
+          -d "parse_mode=Markdown"
+          
     - name: 6️⃣ 编译固件 (排错模式)
       run: |
         cd openwrt
@@ -95,13 +102,21 @@ jobs:
         tag_name: Build_${{ env.FILE_DATE }}
         files: ${{ env.FIRMWARE }}/*
 
-    - name: 9️⃣ TG 通知：编译结果
+    - name: 📢 TG 通知：编译结果
       if: always()
       run: |
+        BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}"
+        CHAT_ID="${{ secrets.TELEGRAM_CHAT_ID }}"
+        
         if [ "${{ job.status }}" == "success" ]; then
           STATUS="✅ *编译成功！*"
         else
           STATUS="❌ *编译失败，请查阅 Actions 日志*"
         fi
+        
         MSG="${STATUS}%0A🕒 时间: $(date '+%Y-%m-%d %H:%M:%S')%0A🔗 详情: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-        curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&text=$MSG&parse_mode=Markdown"
+        
+        curl -s "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+          -d "chat_id=${CHAT_ID}" \
+          -d "text=${MSG}" \
+          -d "parse_mode=Markdown"
