@@ -19,6 +19,9 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
+  # 在此处确保你的 GitHub Secrets 中有名为 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 的变量
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
 jobs:
   build:
@@ -50,6 +53,7 @@ jobs:
 
     - name: 4️⃣ 克隆源码与加载配置
       run: |
+        echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
         git clone --depth 1 --branch $REPO_BRANCH $REPO_URL openwrt
         [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
         cd openwrt
@@ -65,8 +69,8 @@ jobs:
     - name: 📢 TG 通知：编译开始
       run: |
         MSG="🚀 *OpenWrt 编译开始*%0A📟 设备: X86-64%0A🕒 时间: $(date '+%Y-%m-%d %H:%M:%S')"
-        curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-          -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&parse_mode=Markdown&text=$MSG" || true
+        curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d "chat_id=${TELEGRAM_CHAT_ID}&parse_mode=Markdown&text=$MSG" || true
 
     - name: 6️⃣ 编译固件
       id: compile
@@ -81,7 +85,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: Build_${{ date +"%Y%m%d%H%M" }}
+        tag_name: Build_${{ env.FILE_DATE }}
         files: openwrt/bin/targets/*/*/*.{img.gz,img,bin}
 
     - name: 📢 TG 通知：编译结果
@@ -89,5 +93,5 @@ jobs:
       run: |
         STATUS=$([[ "${{ steps.compile.outputs.status }}" == "success" ]] && echo "✅ 编译成功" || echo "❌ 编译失败")
         MSG="${STATUS}%0A🕒 时间: $(date '+%Y-%m-%d %H:%M:%S')%0A🔗 详情: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-        curl -s "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-          -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}&parse_mode=Markdown&text=$MSG" || true
+        curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d "chat_id=${TELEGRAM_CHAT_ID}&parse_mode=Markdown&text=$MSG" || true
