@@ -47,7 +47,8 @@ jobs:
         path: |
           openwrt/dl
           ~/.ccache
-        key: ${{ runner.os }}-openwrt-cache-${{ hashFiles('**/feeds.conf.default', '**/*.config') }}
+        # 修改下方的 key，直接指定确切的文件路径
+        key: ${{ runner.os }}-openwrt-cache-${{ hashFiles('feeds.conf.default', '.config') }}
         restore-keys: |
           ${{ runner.os }}-openwrt-cache-
 
