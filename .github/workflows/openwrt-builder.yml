@@ -19,7 +19,6 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
-  # 在此处确保你的 GitHub Secrets 中有名为 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 的变量
   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
@@ -47,7 +46,6 @@ jobs:
         path: |
           openwrt/dl
           ~/.ccache
-        # 修改下方的 key，直接指定确切的文件路径
         key: ${{ runner.os }}-openwrt-cache-${{ hashFiles('feeds.conf.default', '.config') }}
         restore-keys: |
           ${{ runner.os }}-openwrt-cache-
@@ -55,6 +53,7 @@ jobs:
     - name: 4️⃣ 克隆源码与加载配置
       run: |
         echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        rm -rf openwrt
         git clone --depth 1 --branch $REPO_BRANCH $REPO_URL openwrt
         [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
         cd openwrt
@@ -67,9 +66,14 @@ jobs:
         echo "CONFIG_CCACHE=y" >> .config
         make defconfig
 
-    - name: 📢 TG 通知：编译开始
+    - name: 📢 TG 通知：编译开始（美化版）
       run: |
-        MSG="🚀 *OpenWrt 编译开始*%0A📟 设备: X86-64%0A🕒 时间: $(date '+%Y-%m-%d %H:%M:%S')"
+        MSG="🚀 *OpenWrt 编译开始*%0A"
+        MSG="${MSG}📟 *设备架构:* \`X86-64\`%0A"
+        MSG="${MSG}🌿 *源码分支:* \`${{ env.REPO_BRANCH }}\`%0A"
+        MSG="${MSG}🆔 *运行 ID:* \`${{ github.run_id }}\`%0A"
+        MSG="${MSG}🔗 *Actions 详情:* [点击查看](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})%0A"
+        MSG="${MSG}🕒 *开始时间:* $(date '+%Y-%m-%d %H:%M:%S')"
         curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
           -d "chat_id=${TELEGRAM_CHAT_ID}&parse_mode=Markdown&text=$MSG" || true
 
@@ -89,10 +93,25 @@ jobs:
         tag_name: Build_${{ env.FILE_DATE }}
         files: openwrt/bin/targets/*/*/*.{img.gz,img,bin}
 
-    - name: 📢 TG 通知：编译结果
+    - name: 📢 TG 通知：编译结果（美化版）
       if: always()
       run: |
-        STATUS=$([[ "${{ steps.compile.outputs.status }}" == "success" ]] && echo "✅ 编译成功" || echo "❌ 编译失败")
-        MSG="${STATUS}%0A🕒 时间: $(date '+%Y-%m-%d %H:%M:%S')%0A🔗 详情: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        if [[ "${{ steps.compile.outputs.status }}" == "success" ]]; then
+          STATUS_ICON="✅"
+          STATUS_TEXT="*编译成功*"
+          DOWNLOAD_LINK="📦 *下载固件:* [Releases](${{ github.server_url }}/${{ github.repository }}/releases/tag/Build_${{ env.FILE_DATE }})"
+        else
+          STATUS_ICON="❌"
+          STATUS_TEXT="*编译失败*"
+          DOWNLOAD_LINK=""
+        fi
+        MSG="${STATUS_ICON} ${STATUS_TEXT}%0A"
+        MSG="${MSG}📟 *设备架构:* \`X86-64\`%0A"
+        MSG="${MSG}🏷️ *版本标识:* \`Build_${{ env.FILE_DATE }}\`%0A"
+        if [[ -n "$DOWNLOAD_LINK" ]]; then
+          MSG="${MSG}${DOWNLOAD_LINK}%0A"
+        fi
+        MSG="${MSG}🕒 *完成时间:* $(date '+%Y-%m-%d %H:%M:%S')%0A"
+        MSG="${MSG}🔗 *运行详情:* [点击查看](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
         curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
           -d "chat_id=${TELEGRAM_CHAT_ID}&parse_mode=Markdown&text=$MSG" || true
