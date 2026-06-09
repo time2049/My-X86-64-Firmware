@@ -1,7 +1,6 @@
-name: My-X86-64-Firmware-25分支云编译-优化版
+name: OpenWrt 云编译 (J1900 毕业精简版)
 
 on:
-  repository_dispatch:
   workflow_dispatch:
   schedule:
     - cron: '0 16 * * *'
@@ -10,8 +9,8 @@ permissions:
   contents: write
 
 env:
-  REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: master
+  REPO_URL: https://github.com/openwrt/openwrt
+  REPO_BRANCH: main
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
@@ -19,99 +18,94 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
-  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 480
-
     steps:
-    - name: 1️⃣ 检出代码
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: 1. 检出代码
+        uses: actions/checkout@v4
 
-    - name: 2️⃣ 环境初始化与清理
-      run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        sudo apt-get update
-        sudo apt-get install -y ccache build-essential git gawk jq
-        echo "服务器 CPU: $(lscpu | grep 'Model name' | cut -d: -f2 | xargs)"
+      - name: 2. 初始化环境
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev jq
 
-    - name: 3️⃣ 配置编译缓存
-      uses: actions/cache@v4
-      with:
-        path: |
-          openwrt/dl
-          ~/.ccache
-        key: ${{ runner.os }}-openwrt-cache-${{ hashFiles('feeds.conf.default', '.config') }}
-        restore-keys: |
-          ${{ runner.os }}-openwrt-cache-
+      # 缓存 ccache 和 dl 目录（独立于源码目录）
+      - name: 3. 挂载编译缓存 (ccache & dl)
+        uses: actions/cache@v4
+        with:
+          path: |
+            cache/dl
+            cache/ccache
+          key: ${{ runner.os }}-openwrt-${{ hashFiles('**/feeds.conf.default', '**/*.config') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-
 
-    - name: 4️⃣ 克隆源码与加载配置
-      run: |
-        echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-        rm -rf openwrt
-        git clone --depth 1 --branch $REPO_BRANCH $REPO_URL openwrt
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-        cd openwrt
-        chmod +x ../$DIY_P1_SH && ../$DIY_P1_SH
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-        [ -e ../$CONFIG_FILE ] && mv ../$CONFIG_FILE .config
-        chmod +x ../$DIY_P2_SH && ../$DIY_P2_SH
-        sed -i 's/CONFIG_SIGNED_PACKAGES=y/CONFIG_SIGNED_PACKAGES=n/g' .config
-        echo "CONFIG_CCACHE=y" >> .config
-        make defconfig
+      - name: 4. TG 通知 (编译开始)
+        if: always()
+        run: |
+          MSG="🚀 OpenWrt 编译开始%0A%0A📦 仓库: ${GITHUB_REPOSITORY}%0A🕒 时间: $(date '+%Y-%m-%d %H:%M:%S')"
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="$MSG"
 
-    - name: 📢 TG 通知：编译开始（美化版）
-      run: |
-        MSG="🚀 *OpenWrt 编译开始*%0A"
-        MSG="${MSG}📟 *设备架构:* \`X86-64\`%0A"
-        MSG="${MSG}🌿 *源码分支:* \`${{ env.REPO_BRANCH }}\`%0A"
-        MSG="${MSG}🆔 *运行 ID:* \`${{ github.run_id }}\`%0A"
-        MSG="${MSG}🔗 *Actions 详情:* [点击查看](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})%0A"
-        MSG="${MSG}🕒 *开始时间:* $(date '+%Y-%m-%d %H:%M:%S')"
-        curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-          -d "chat_id=${TELEGRAM_CHAT_ID}&parse_mode=Markdown&text=$MSG" || true
+      - name: 5. 克隆源码与编译
+        id: compile
+        run: |
+          # 克隆到独立目录 openwrt-src
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt-src
+          cd openwrt-src
 
-    - name: 6️⃣ 编译固件
-      id: compile
-      run: |
-        cd openwrt
-        make -j$(nproc) || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
+          # 准备缓存目录（工作区根目录下的 cache 文件夹）
+          mkdir -p ../cache/dl ../cache/ccache
 
-    - name: 7️⃣ 上传固件到 Releases
-      if: steps.compile.outputs.status == 'success'
-      uses: softprops/action-gh-release@v2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: Build_${{ env.FILE_DATE }}
-        files: openwrt/bin/targets/*/*/*.{img.gz,img,bin}
+          # 软链接缓存目录到 OpenWrt 源码内
+          ln -sf ../cache/dl dl
+          ln -sf ../cache/ccache .ccache
 
-    - name: 📢 TG 通知：编译结果（美化版）
-      if: always()
-      run: |
-        if [[ "${{ steps.compile.outputs.status }}" == "success" ]]; then
-          STATUS_ICON="✅"
-          STATUS_TEXT="*编译成功*"
-          DOWNLOAD_LINK="📦 *下载固件:* [Releases](${{ github.server_url }}/${{ github.repository }}/releases/tag/Build_${{ env.FILE_DATE }})"
-        else
-          STATUS_ICON="❌"
-          STATUS_TEXT="*编译失败*"
-          DOWNLOAD_LINK=""
-        fi
-        MSG="${STATUS_ICON} ${STATUS_TEXT}%0A"
-        MSG="${MSG}📟 *设备架构:* \`X86-64\`%0A"
-        MSG="${MSG}🏷️ *版本标识:* \`Build_${{ env.FILE_DATE }}\`%0A"
-        if [[ -n "$DOWNLOAD_LINK" ]]; then
-          MSG="${MSG}${DOWNLOAD_LINK}%0A"
-        fi
-        MSG="${MSG}🕒 *完成时间:* $(date '+%Y-%m-%d %H:%M:%S')%0A"
-        MSG="${MSG}🔗 *运行详情:* [点击查看](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-        curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-          -d "chat_id=${TELEGRAM_CHAT_ID}&parse_mode=Markdown&text=$MSG" || true
+          # 启用 ccache
+          export CCACHE_DIR="$PWD/.ccache"
+          export PATH="/usr/lib/ccache:$PATH"
+          ccache -M 10G
+
+          # 复制 feeds 配置
+          [ -e ../$FEEDS_CONF ] && cp ../$FEEDS_CONF feeds.conf.default
+          # 执行自定义脚本 diy-part1.sh
+          chmod +x ../$DIY_P1_SH && ../$DIY_P1_SH
+          # 更新 feeds
+          ./scripts/feeds update -a && ./scripts/feeds install -a
+          # 复制 .config
+          [ -e ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config
+          # 执行自定义脚本 diy-part2.sh
+          chmod +x ../$DIY_P2_SH && ../$DIY_P2_SH
+
+          # 强制开启 ccache 配置
+          sed -i 's/CONFIG_CCACHE=n/CONFIG_CCACHE=y/g' .config || echo 'CONFIG_CCACHE=y' >> .config
+
+          make defconfig
+          make -j$(nproc) || make -j1 V=s
+          echo "status=success" >> $GITHUB_OUTPUT
+
+          # 获取固件名称用于后续步骤
+          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+          echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+          echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+      - name: 6. 上传固件到 Release
+        if: steps.compile.outputs.status == 'success'
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: Build_${{ env.FILE_DATE }}
+          files: openwrt-src/bin/targets/*/*/*.{img.gz,img,bin}
+
+      - name: 7. TG 通知 (编译结果)
+        if: always()
+        run: |
+          STATUS=$([[ "${{ steps.compile.outputs.status }}" == "success" ]] && echo "✅ 编译成功" || echo "❌ 编译失败")
+          MSG="${STATUS}%0A%0A📦 仓库: ${GITHUB_REPOSITORY}%0A🕒 时间: $(date '+%Y-%m-%d %H:%M:%S')%0A🔗 详情: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="$MSG"
