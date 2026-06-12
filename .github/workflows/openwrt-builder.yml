@@ -73,6 +73,18 @@ jobs:
           [ -e ../$FEEDS_CONF ] && cp ../$FEEDS_CONF feeds.conf.default
           # 执行自定义脚本 diy-part1.sh
           chmod +x ../$DIY_P1_SH && ../$DIY_P1_SH
+
+          # ======= 核心修复：手动下载缺失的 luci-theme-argon 主题源码 =======
+          mkdir -p package/custom
+          cd package/custom
+          # 克隆主题核心
+          git clone --depth 1 https://github.com/jerrykuku/luci-theme-argon.git
+          # 克隆配套的配置插件，并清除潜在线上旧版本冲突
+          rm -rf luci-app-argon-config
+          git clone --depth 1 https://github.com/jerrykuku/luci-app-argon-config.git
+          cd ../..
+          # ===============================================================
+
           # 更新 feeds
           ./scripts/feeds update -a && ./scripts/feeds install -a
           # 复制 .config
