@@ -41,8 +41,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            openwrt-src/dl
-            openwrt-src/.ccache
+            cache/dl
+            cache/ccache
           key: ${{ runner.os }}-openwrt-${{ hashFiles('feeds.conf.default', '.config') }}
           restore-keys: |
             ${{ runner.os }}-openwrt-
@@ -58,11 +58,17 @@ jobs:
       - name: 6. 克隆源码与编译
         id: compile
         run: |
+          # 🌟 关键修复：克隆前强行清理残留目录，杜绝 Git 128 报错罢工
+          rm -rf openwrt-src
+
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt-src
           cd openwrt-src
 
-          # 创建缓存目录
-          mkdir -p dl .ccache
+          # 创建并链接独立于源码树的缓存，防止缓存破坏 git 结构
+          mkdir -p ../cache/dl ../cache/ccache
+          ln -sf ../cache/dl dl
+          ln -sf ../cache/ccache .ccache
+
           export CCACHE_DIR="$PWD/.ccache"
           export PATH="/usr/lib/ccache:$PATH"
           ccache -M 3G # 限制为 3G 避免爆盘
