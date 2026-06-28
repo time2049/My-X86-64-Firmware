@@ -1,45 +1,27 @@
 #!/bin/bash
 #
 # OpenWrt DIY script part 1 (Before Update feeds)
-# 仅保留 OpenClash + Argon 主题，PassWall 已彻底移除
 #
 
-# 防止重复添加相同源的函数
-add_feed() {
-    local feed_line="$1"
-    if ! grep -Fxq "$feed_line" feeds.conf.default; then
-        echo "$feed_line" >> feeds.conf.default
-        echo "✅ 已添加源: $feed_line"
-    else
-        echo "⚠️ 源已存在，跳过: $feed_line"
-    fi
-}
-
-# 1. 清理旧源残留
+# 清理旧源可能存在的脏数据
 sed -i '/argonconfig/d' feeds.conf.default
+sed -i '/openclash/d' feeds.conf.default
+sed -i '/argon/d' feeds.conf.default
 
-# 2. 添加所需源（OpenClash + Argon 主题）
-add_feed 'src-git openclash https://github.com/vernesong/OpenClash.git'
-add_feed 'src-git argon https://github.com/jerrykuku/luci-theme-argon.git'
+# 1. 建立自定义本地包存放目录
+mkdir -p package/custom
 
-# 3. 更新并安装 feeds（仅针对已添加的源）
-./scripts/feeds update openclash argon
-./scripts/feeds install -a
-
-# 4. 修复 /etc/config/luci 文件冲突（OpenWrt 通用问题，与 PassWall 无关）
-BASE_FILES_DIR="package/base-files"
-if [ -d "$BASE_FILES_DIR" ]; then
-    find "$BASE_FILES_DIR" -type f -path "*/etc/config/luci" -exec rm -f {} \;
-    sed -i '/\/etc\/config\/luci/d' "$BASE_FILES_DIR/Makefile" 2>/dev/null
-    echo "✅ 已从 base-files 中移除 /etc/config/luci"
+# 2. 直接将 OpenClash 作为独立包克隆，而不是作为 feed 源
+# 这是目前最稳妥、不会破坏 main 分支 Makefile 的做法
+if [ ! -d "package/custom/OpenClash" ]; then
+    git clone --depth 1 -b master https://github.com/vernesong/OpenClash.git package/custom/OpenClash
+    echo "✅ OpenClash 克隆成功"
 fi
 
-LUCI_BASE_MK="feeds/luci/luci-base/Makefile"
-if [ -f "$LUCI_BASE_MK" ]; then
-    if ! grep -q "PKG_REPLACES:=" "$LUCI_BASE_MK"; then
-        sed -i '/^PKG_NAME:=luci-base/a PKG_REPLACES:=base-files' "$LUCI_BASE_MK"
-        echo "✅ 已为 luci-base 添加 PKG_REPLACES:=base-files"
-    fi
+# 3. 同样的，把 Argon 主题也直接作为本地包克隆
+if [ ! -d "package/custom/luci-theme-argon" ]; then
+    git clone --depth 1 https://github.com/jerrykuku/luci-theme-argon.git package/custom/luci-theme-argon
+    echo "✅ Argon 主题克隆成功"
 fi
 
-echo "✅ diy-part1.sh 执行完毕"
+echo "🚀 diy-part1.sh 预处理完毕"
