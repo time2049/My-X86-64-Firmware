@@ -58,7 +58,7 @@ jobs:
       - name: 6. 克隆源码与编译
         id: compile
         run: |
-          # 🌟 关键修复：克隆前强行清理残留目录，杜绝 Git 128 报错罢工
+          # 强行清理残留目录，杜绝 Git 128 报错
           rm -rf openwrt-src
 
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt-src
@@ -76,6 +76,7 @@ jobs:
           [ -e ../$FEEDS_CONF ] && cp ../$FEEDS_CONF feeds.conf.default
           chmod +x ../$DIY_P1_SH && ../$DIY_P1_SH
 
+          # 拉取兼容 main 主线分支的自定义主题与插件
           mkdir -p package/custom
           cd package/custom
           git clone --depth 1 https://github.com/jerrykuku/luci-theme-argon.git
@@ -83,15 +84,25 @@ jobs:
           git clone --depth 1 https://github.com/jerrykuku/luci-app-argon-config.git
           cd ../..
 
+          # 更新与安装 feeds
           ./scripts/feeds update -a && ./scripts/feeds install -a
+          
+          # 🔥【关键修复】强行清理因 main 分支与第三方插件冲突产生的脏配置缓存
+          rm -rf tmp
+
           [ -e ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config
           chmod +x ../$DIY_P2_SH && ../$DIY_P2_SH
 
           sed -i 's/CONFIG_CCACHE=n/CONFIG_CCACHE=y/g' .config || echo 'CONFIG_CCACHE=y' >> .config
 
-          make defconfig
+          # 🔥【关键修复】如果配置失败，再次清洗 tmp 并尝试重建菜单树
+          make defconfig || (rm -rf tmp && make defconfig)
+          
           df -h # 编译前查看一次空间
+          
+          # 🔥【关键修复】多线程编译失败时，自动降级为单线程输出详细日志，方便定位
           make -j$(nproc) || make -j1 V=s
+          
           df -h # 编译后查看一次空间
           echo "status=success" >> $GITHUB_OUTPUT
 
