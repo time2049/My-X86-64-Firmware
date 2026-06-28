@@ -1,23 +1,20 @@
 #!/bin/bash
 #
 # OpenWrt DIY script part 2 (After Update feeds)
-# 仅保留通用优化 + OpenClash 支持，PassWall 相关已全部移除
 #
 
-# ==================== Golang 编译环境优化（对 OpenClash 也有用） ====================
-echo "🧹 清理可能冲突的 Go 缓存..."
-rm -rf feeds/packages/lang/golang 2>/dev/null
-rm -rf dl/go-mod-cache 2>/dev/null
-
+# ==================== Golang 编译环境优化 ====================
+# 注释掉 rm -rf golang，绝对不能在 main 分支硬删官方 Go 树！
+# 只进行环境变量和代理缓存的优化即可
 export GO111MODULE=on
 export GOPROXY=https://proxy.golang.org,direct
 export GOMODCACHE=$GITHUB_WORKSPACE/openwrt/dl/go-mod-cache
 # ===================================================================================
 
-# 1. 修改默认管理 IP
+# 1. 修改默认管理 IP 为 10.1.1.1
 sed -i 's/192.168.1.1/10.1.1.1/g' package/base-files/files/bin/config_generate
 
-# 2. 固化中文语言与 Argon 主题（uci-defaults 脚本，无文件冲突）
+# 2. 固化中文语言与 Argon 主题
 mkdir -p package/base-files/files/etc/uci-defaults
 cat << 'EOF' > package/base-files/files/etc/uci-defaults/99-custom-luci
 #!/bin/sh
@@ -48,20 +45,17 @@ EOF
 fi
 echo "✅ 已注入 J1900 硬件优化参数"
 
-# 4. 添加 Argon 配置插件（从 Git 直接拉取，确保存在）
-mkdir -p package/lean
-if [ ! -d "package/lean/luci-app-argon-config" ]; then
-    git clone --depth 1 https://github.com/jerrykuku/luci-app-argon-config.git package/lean/luci-app-argon-config
+# 4. 添加 Argon 配置插件 (直接克隆到 custom 维护，防止与你在 workflow yml 里的重复)
+if [ ! -d "package/custom/luci-app-argon-config" ]; then
+    git clone --depth 1 https://github.com/jerrykuku/luci-app-argon-config.git package/custom/luci-app-argon-config
     echo "✅ 已添加 luci-app-argon-config"
-else
-    echo "✅ luci-app-argon-config 已存在"
 fi
 
-# 5. （可选）首页温度显示模板 - 如果你有自定义文件则应用
+# 5. 首页温度显示模板保持原样
 TARGET_INDEX="feeds/luci/modules/luci-mod-status/luasrc/view/admin_status/index.htm"
 if [ -f "files/usr/lib/lua/luci/view/admin_status/index.htm" ]; then
     cp -f "files/usr/lib/lua/luci/view/admin_status/index.htm" "$TARGET_INDEX" 2>/dev/null
     echo "✅ 已应用自定义温度显示模板"
 fi
 
-echo "🚀 diy-part2.sh 执行完毕（仅通用优化 + OpenClash）"
+echo "🚀 diy-part2.sh 优化配置注入完毕"
