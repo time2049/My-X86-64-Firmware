@@ -57,48 +57,41 @@ jobs:
 
       - name: 6. 克隆源码与编译
         id: compile
+        env:
+          # 🌟 核心破限流注入：授权给编译环境，让 diy-part2.sh 无限额请求 API
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 强行清理残留目录，杜绝 Git 128 报错
           rm -rf openwrt-src
-
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt-src
           cd openwrt-src
 
-          # 创建并链接独立于源码树的缓存，防止缓存破坏 git 结构
           mkdir -p ../cache/dl ../cache/ccache
           ln -sf ../cache/dl dl
           ln -sf ../cache/ccache .ccache
 
           export CCACHE_DIR="$PWD/.ccache"
           export PATH="/usr/lib/ccache:$PATH"
-          ccache -M 3G # 限制为 3G 避免爆盘
+          ccache -M 3G
 
           [ -e ../$FEEDS_CONF ] && cp ../$FEEDS_CONF feeds.conf.default
           
-          # 🌟 调用 diy-part1.sh：干净地拉取 OpenClash 和 Argon 到 package/custom/ 
-          # 移除了此处 yml 的重复克隆逻辑，彻底解决 128 冲突报错
           chmod +x ../$DIY_P1_SH && ../$DIY_P1_SH
 
-          # 更新与安装 feeds
           ./scripts/feeds update -a && ./scripts/feeds install -a
           
-          # 🔥 强行清理因 main 分支与第三方插件冲突产生的脏配置缓存
           rm -rf tmp
-
           [ -e ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config
+          
+          # 执行完此脚本后，OpenClash 官方最新原生 .apk 将会被塞入 root 预装区
           chmod +x ../$DIY_P2_SH && ../$DIY_P2_SH
 
           sed -i 's/CONFIG_CCACHE=n/CONFIG_CCACHE=y/g' .config || echo 'CONFIG_CCACHE=y' >> .config
 
-          # 🔥 如果配置失败，再次清洗 tmp 并尝试重建菜单树
           make defconfig || (rm -rf tmp && make defconfig)
           
-          df -h # 编译前查看一次空间
-          
-          # 🔥 多线程编译失败时，自动降级为单线程输出详细日志
+          df -h
           make -j$(nproc) || make -j1 V=s
-          
-          df -h # 编译后查看一次空间
+          df -h
           echo "status=success" >> $GITHUB_OUTPUT
 
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
