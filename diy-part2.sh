@@ -4,7 +4,7 @@
 # 1. 精准修改默认管理 IP
 sed -i 's/192.168.1.1/10.1.1.1/g' package/base-files/files/bin/config_generate
 
-# 2. 核心修复1：直接修改 x86 架构的默认核心打包列表，强行将中文包合并进系统镜像（治愈漏中文字套）
+# 2. 核心修复：直接修改 x86 架构的默认核心打包列表，强行将中文包合并进系统镜像（治愈漏中文字套）
 sed -i 's/DEFAULT_PACKAGES +=/DEFAULT_PACKAGES += luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn luci-i18n-package-manager-zh-cn/g' target/linux/x86/Makefile
 
 # 3. UCI 终极初始化防线（锁死 IP 与主题）并在首次开机时自动安装预埋的 OpenClash 原生 APK
@@ -60,54 +60,21 @@ else
     echo "❌ 获取 OpenClash 版本号超时"
 fi
 
-# 6. 🌟 纯 nftables 架构依赖全家桶（全面对接新版 [nftables for apk] 需求）
-cat << 'EOF' >> .config
-# ======== OpenWrt APK 全局语言强依赖构建宏 ========
-CONFIG_BUILD_NLS=y
-CONFIG_LUCI_LANG_zh_Hans=y
-CONFIG_LUCI_LANG_zh-cn=y
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_luci-base=y
-CONFIG_PACKAGE_luci-compat=y
-CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
-CONFIG_PACKAGE_luci-app-package-manager=y
-CONFIG_PACKAGE_luci-i18n-package-manager-zh-cn=y
+# 6. 🌟 固化 J1900 功耗补丁（防止低功耗 C-States 深睡导致无故死机）
+echo "🛠️ 正在源头固化 J1900 修复参数 (intel_idle.max_cstate=1) ..."
+# 双保险：修改内核编译底包配置 + GRUB 引导生成模板
+find target/linux/x86/ -name "config-*" | while read -r config_file; do
+    if grep -q "CONFIG_CMDLINE=" "$config_file"; then
+        sed -i 's/CONFIG_CMDLINE="/&intel_idle.max_cstate=1 /' "$config_file"
+    else
+        echo 'CONFIG_CMDLINE="intel_idle.max_cstate=1"' >> "$config_file"
+    fi
+done
 
-# ======== 主题本地配置 ========
-CONFIG_PACKAGE_luci-theme-argon=y
-CONFIG_PACKAGE_luci-app-argon-config=y
-CONFIG_PACKAGE_luci-i18n-argon-config-zh-cn=y
-
-# ======== 纯 nftables 架构依赖全家桶 ========
-CONFIG_PACKAGE_bash=y
-CONFIG_PACKAGE_dnsmasq-full=y
-CONFIG_PACKAGE_curl=y
-CONFIG_PACKAGE_ca-bundle=y
-CONFIG_PACKAGE_ip-full=y
-CONFIG_PACKAGE_unzip=y
-CONFIG_PACKAGE_ruby=y
-CONFIG_PACKAGE_ruby-yaml=y
-CONFIG_PACKAGE_ruby-psych=y
-CONFIG_PACKAGE_ruby-dbm=y
-CONFIG_PACKAGE_ruby-pstore=y
-
-# 内核路由及 nftables TProxy 转发核心模块
-CONFIG_PACKAGE_kmod-tun=y
-CONFIG_PACKAGE_kmod-inet-diag=y
-CONFIG_PACKAGE_kmod-nft-tproxy=y
-
-# 确保旧版 iptables 完全关闭，防止规则冲突
-CONFIG_PACKAGE_iptables=n
-CONFIG_PACKAGE_iptables-mod-tproxy=n
-
-# ======== J1900 物理硬件驱动 ========
-CONFIG_PACKAGE_kmod-coretemp=y
-CONFIG_PACKAGE_kmod-it87=y
-CONFIG_PACKAGE_lm-sensors=y
-CONFIG_PACKAGE_kmod-ppp=y
-CONFIG_PACKAGE_kmod-pppox=y
-CONFIG_PACKAGE_kmod-pppoe=y
-EOF
+GRUB_TEMPLATE="target/linux/x86/image/grub.cfg"
+if [ -f "$GRUB_TEMPLATE" ]; then
+    sed -i 's/noinitrd/noinitrd intel_idle.max_cstate=1/g' "$GRUB_TEMPLATE"
+    echo "✅ GRUB 模板注入参数成功"
+fi
 
 echo "✅ diy-part2.sh 执行完毕。"
