@@ -15,8 +15,6 @@ env:
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
-  UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
 
 jobs:
@@ -58,13 +56,13 @@ jobs:
       - name: 6. 克隆源码与编译
         id: compile
         env:
-          # 🌟 核心破限流注入：授权给编译环境，让 diy-part2.sh 无限额请求 API
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           rm -rf openwrt-src
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt-src
           cd openwrt-src
 
+          # 建立缓存硬目录映射
           mkdir -p ../cache/dl ../cache/ccache
           ln -sf ../cache/dl dl
           ln -sf ../cache/ccache .ccache
@@ -82,18 +80,23 @@ jobs:
           rm -rf tmp
           [ -e ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config
           
-          # 执行完此脚本后，OpenClash 官方最新原生 .apk 将会被塞入 root 预装区
+          # 执行自定义脚本（注入 J1900 功耗补丁与抓取 OpenClash 原生 APK）
           chmod +x ../$DIY_P2_SH && ../$DIY_P2_SH
 
+          # 强行开启 ccache 提速
           sed -i 's/CONFIG_CCACHE=n/CONFIG_CCACHE=y/g' .config || echo 'CONFIG_CCACHE=y' >> .config
 
+          # 生成并校验依赖
           make defconfig || (rm -rf tmp && make defconfig)
           
           df -h
-          make -j$(nproc) || make -j1 V=s
+          # 核心多线程编译，若失败则降到单线程输出错误日志
+          make -j$(($(nproc)+1)) || make -j1 V=s
           df -h
+          
           echo "status=success" >> $GITHUB_OUTPUT
 
+          # 获取设备名与时间戳
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
           echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
           echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
@@ -105,7 +108,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: Build_${{ env.FILE_DATE }}
-          files: openwrt-src/bin/targets/*/*/*.{img.gz,img,bin}
+          # 🌟 改为更宽泛的文件通配匹配，防止漏掉带有 .efi 或 .tar.gz 格式的全新固件
+          files: |
+            openwrt-src/bin/targets/x86/64/*.img.gz
+            openwrt-src/bin/targets/x86/64/*.img
+            openwrt-src/bin/targets/x86/64/*-combined*
+            openwrt-src/bin/targets/x86/64/*-rootfs*
 
       - name: 8. TG 通知 (编译结果)
         if: always()
