@@ -7,26 +7,6 @@ sed -i 's/192.168.1.1/10.1.1.1/g' package/base-files/files/bin/config_generate
 # 2. 核心修复：直接修改 x86 架构的默认核心打包列表，强行将中文包合并进系统镜像（治愈漏中文字套）
 sed -i 's/DEFAULT_PACKAGES +=/DEFAULT_PACKAGES += luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn luci-i18n-package-manager-zh-cn/g' target/linux/x86/Makefile
 
-# 🌟 2.5 解决 25.12/SNAPSHOT 下 Argon 回退 Boot 的核心补丁
-# 彻底移除 feeds 中可能冲突的主题和配置包
-rm -rf feeds/luci/themes/luci-theme-argon
-rm -rf feeds/luci/applications/luci-app-argon-config
-
-# 为 LuCI JS 补全 Argon 的菜单注册 JSON 文件
-mkdir -p package/base-files/files/usr/share/luci/menu.d
-cat << 'EOF' > package/base-files/files/usr/share/luci/menu.d/luci-theme-argon.json
-{
-	"admin/system/argon": {
-		"title": "Argon",
-		"action": {
-			"type": "view",
-			"path": "argon"
-		},
-		"oclass": "theme-argon"
-	}
-}
-EOF
-
 # 3. UCI 终极初始化防线（锁死 IP 与主题）并在首次开机时自动安装预埋的 OpenClash 原生 APK
 mkdir -p package/base-files/files/etc/uci-defaults
 cat << 'EOF' > package/base-files/files/etc/uci-defaults/99-init-settings
@@ -35,15 +15,9 @@ uci set network.lan.ipaddr='10.1.1.1'
 uci set network.lan.netmask='255.255.255.0'
 uci commit network
 
-# 强刷中文语言与 Argon 主题路径
 uci set luci.main.lang=zh_cn
 uci set luci.main.mediaurlbase=/luci-static/argon
-uci set luci.themes.argon='/luci-static/argon'
-uci set luci.themes.Argon='/luci-static/argon'
 uci commit luci
-
-# 允许 APK 管理器直接安装未签名包
-uci set apk.global.allow_untrusted='1' 2>/dev/null || true
 
 # 🌟 核心开机自启：使用通配符匹配 /root/ 下的原名 .apk
 # 首次开机无网环境下强制释放并强制本地安装，安装完自行销毁
@@ -52,8 +26,6 @@ if [ -f /root/luci-app-openclash*.apk ]; then
     rm -f /root/luci-app-openclash*.apk
 fi
 
-# 清理缓存，确保首次载入不乱套
-rm -rf /tmp/luci-indexcache /tmp/luci-modulecache/
 rm -f /var/run/fw4.lock /var/run/luci-reload.lock
 exit 0
 EOF
