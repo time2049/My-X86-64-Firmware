@@ -120,9 +120,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release list --limit 30 | awk 'NR>5 {print $3}' | while read -r tag; do
-            echo "Deleting release and tag: $tag"
-            gh release delete "$tag" -y --cleanup-tag
+          gh release list --limit 30 --json tagName --jq '.[5:] | .[].tagName' | while read -r tag; do
+            if [ -n "$tag" ]; then
+              echo "Deleting release and tag: $tag"
+              gh release delete "$tag" -y --cleanup-tag || true
+            fi
           done
 
       - name: 9. TG 通知 (编译结果)
