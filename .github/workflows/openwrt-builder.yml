@@ -115,7 +115,17 @@ jobs:
             openwrt-src/bin/targets/x86/64/*-combined*
             openwrt-src/bin/targets/x86/64/*-rootfs*
 
-      - name: 8. TG 通知 (编译结果)
+      - name: 8. 定期清理旧 Releases (保留最新 5 个)
+        if: steps.compile.outputs.status == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --limit 30 | awk 'NR>5 {print $3}' | while read -r tag; do
+            echo "Deleting release and tag: $tag"
+            gh release delete "$tag" -y --cleanup-tag
+          done
+
+      - name: 9. TG 通知 (编译结果)
         if: always()
         run: |
           STATUS=$([[ "${{ steps.compile.outputs.status }}" == "success" ]] && echo "✅ 编译成功" || echo "❌ 编译失败")
