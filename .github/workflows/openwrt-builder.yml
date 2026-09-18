@@ -108,12 +108,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: Build_${{ env.FILE_DATE }}
-          # 🌟 改为更宽泛的文件通配匹配，防止漏掉带有 .efi 或 .tar.gz 格式的全新固件
+          fail_on_unmatched_files: false
           files: |
             openwrt-src/bin/targets/x86/64/*.img.gz
-            openwrt-src/bin/targets/x86/64/*.img
-            openwrt-src/bin/targets/x86/64/*-combined*
-            openwrt-src/bin/targets/x86/64/*-rootfs*
+            openwrt-src/bin/targets/x86/64/*.tar.gz
 
       - name: 8. 定期清理旧 Releases (保留最新 5 个)
         if: steps.compile.outputs.status == 'success'
